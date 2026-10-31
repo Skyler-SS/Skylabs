@@ -24,5 +24,11 @@
   "private": true,
   "engines": {
     "node": ">=24 <25"
+  },
+  "overrides": {
+    "@electron/asar": {
+      "glob": "14.0.3",
+      "minimatch": "11.0.3"
+    }
   }
 }

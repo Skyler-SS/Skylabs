@@ -29,3 +29,10 @@ validation. Do not improve a score by hiding unconverged or invalid results.
 
 Keep dependency versions locked. If updating the CAD importer, update its license
 texts, corresponding-source manifest and checksums together.
+
+The Electron ASAR build tool pins patched `glob` and `minimatch` through scoped
+overrides until upstream accepts them. These address
+[GHSA-3g3m-2fjr-6pw4](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4) and
+[GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249).
+Recheck `npm --prefix work/aerodesk audit` and the full Windows packaging path
+when changing these overrides; the build tools are not shipped in the app.
