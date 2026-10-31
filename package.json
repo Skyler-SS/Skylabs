@@ -1,0 +1,16 @@
+{
+  "name": "aerodesk-repository",
+  "version": "0.14.0",
+  "private": true,
+  "license": "MIT",
+  "engines": { "node": ">=24 <25" },
+  "scripts": {
+    "setup": "npm --prefix work/aerodesk ci",
+    "test": "npm --prefix work/aerodesk test",
+    "build": "npm --prefix work/aerodesk run build",
+    "start": "npm --prefix work/aerodesk start",
+    "package": "npm --prefix work/aerodesk run package",
+    "dist": "npm run package && node scripts/release.cjs",
+    "check:repo": "node scripts/check-repository.cjs"
+  }
+}

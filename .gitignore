@@ -1,0 +1,70 @@
+# Packaged apps, OpenFOAM installations, CAD projects and simulation results.
+/outputs/
+
+# Downloaded dependencies and files recreated by npm run build.
+node_modules/
+/work/aerodesk/dist/
+/work/aerodesk/vendor/
+coverage/
+.nyc_output/
+.cache/
+
+# Local experiments, case folders and one-off scripts stay on this PC.
+# Publish the maintained application, tests, Fusion add-in and GPU scripts.
+/work/*
+!/work/aerodesk/
+/work/aerodesk/check-*
+
+# Generated scratch data beside the development and benchmark scripts.
+/work/*.json
+/work/*.txt
+/work/*.aero
+/work/*.stl
+/work/*.obj
+/work/*.step
+/work/*.stp
+/work/*.iges
+/work/*.igs
+/work/*.3mf
+/work/*.png
+/work/*.jpg
+/work/*.jpeg
+/work/*.pdf
+/work/*.zip
+/work/log.*
+
+# Process output, caches and temporary files.
+*.log
+*.out
+*.err
+*.tmp
+*.temp
+*.bak
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Machine-specific configuration and credentials; templates may be committed.
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+.npmrc
+credentials/
+secrets/
+credentials.json
+credentials*.bin
+*.key
+*.p12
+*.pfx
+
+# Operating-system and editor scratch files.
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~

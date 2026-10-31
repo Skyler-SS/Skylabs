@@ -1,0 +1,11 @@
+import {rebuildExterior} from './exterior-rebuild.mjs';import {cleanMesh} from './clean-mesh.mjs';
+import {parentPort,workerData} from 'node:worker_threads';
+import {createRequire} from 'node:module';import path from 'node:path';import {pathToFileURL} from 'node:url';import fs from 'node:fs';
+import {import3MF} from './import-3mf.mjs';import {cleanAssembly} from './assembly-repair.mjs';
+async function manifold(){const m=await import(pathToFileURL(path.join(__dirname,'../vendor/manifold.mjs')).href);const api=await m.default({wasmBinary:fs.readFileSync(path.join(__dirname,'../vendor/manifold.wasm'))});api.setup();return api;}
+async function run(){const d=workerData;if(d.type==='rebuild'){const r=await rebuildExterior(new Float32Array(d.vertices),manifold);const c=cleanMesh(r.vertices,{weldTolerance:1e-8});c.report.rebuiltExterior=true;c.report.rebuildSpacing=r.spacing;c.report.unionNote='Approximate exterior rebuilt at '+r.resolution+' cells across the longest dimension. Features and gaps smaller than about two cells may disappear. Review against the original CAD before trusting results.';return c;}if(d.type==='clean')return cleanAssembly(new Float32Array(d.vertices),d.parts?.map(p=>new Float32Array(p)),manifold);
+ if(d.type==='3mf')return import3MF(new Uint8Array(d.bytes));
+ if(d.type==='step'){const require=createRequire(path.join(__dirname,'worker.cjs'));const occt=await require('../vendor/occt-import-js.cjs')();const r=occt.ReadStepFile(new Uint8Array(d.bytes),{linearUnit:'meter',linearDeflectionType:'bounding_box_ratio',linearDeflection:.0005,angularDeflection:.3});if(!r.success||!r.meshes?.length)throw Error('STEP contains no tessellatable solid surfaces.');let count=0;const parts=r.meshes.map(m=>{count+=m.index.array.length/3;if(count>200000)throw Error('STEP tessellation exceeds 200,000 triangles. Simplify the design before importing.');const v=new Float32Array(m.index.array.length*3);m.index.array.forEach((id,i)=>v.set(m.attributes.position.array.slice(id*3,id*3+3),i*3));return v;});return {parts,unit:'meter',sourceUp:'Z'};}
+ throw Error('Unknown model operation.');}
+run().then(result=>parentPort.postMessage({result})).catch(e=>parentPort.postMessage({error:e.message}));
+

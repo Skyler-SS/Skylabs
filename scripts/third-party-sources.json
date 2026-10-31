@@ -1,0 +1,12 @@
+[
+  {
+    "file": "occt-import-js-0.0.23-source.zip",
+    "url": "https://codeload.github.com/kovacsv/occt-import-js/zip/c2148e54b456b571238d35cac037d304053d64b2",
+    "sha256": "df65cbd560ab69f22c13ecb6cfe5484412e16061af6987e26179fb64ad0d807a"
+  },
+  {
+    "file": "OCCT-corresponding-source.zip",
+    "url": "https://codeload.github.com/Open-Cascade-SAS/OCCT/zip/d2abb6d844231cb8f29be6894440874a4700e4a5",
+    "sha256": "8f04a18e2900b8ebf1c90daa5294a6ce27c93e23b4523f1d4556b22ea63a61c5"
+  }
+]

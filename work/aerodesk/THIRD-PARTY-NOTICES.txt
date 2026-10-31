@@ -1,0 +1,58 @@
+Three.js (bundled renderer and import utilities)
+
+The MIT License
+
+Copyright © 2010-2026 three.js authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+
+Electron and Chromium runtime licenses are included beside AeroDesk.exe.
+
+OpenFOAM v2512 (separate native runtime, not bundled in the Electron ASAR)
+Copyright OpenCFD Ltd. and OpenFOAM contributors.
+GNU GPL version 3 or later. Full license:
+OpenFOAM-runtime/msys64/home/ofuser/OpenFOAM/OpenFOAM-v2512/COPYING
+Official binary and corresponding source distribution:
+https://dl.openfoam.com/source/v2512/
+The serial Pstream runtime supports use without Microsoft MPI; parallel solving uses the separately configured MPI runtime.
+
+STEP importer: occt-import-js 0.0.23 (LGPL-2.1), unmodified upstream runtime.
+Source commit c2148e54b456b571238d35cac037d304053d64b2:
+https://github.com/kovacsv/occt-import-js/tree/c2148e54b456b571238d35cac037d304053d64b2
+OCCT submodule commit d2abb6d844231cb8f29be6894440874a4700e4a5 (LGPL-2.1 with OCCT exception):
+https://github.com/Open-Cascade-SAS/OCCT/tree/d2abb6d844231cb8f29be6894440874a4700e4a5
+Full license texts are in vendor/licenses. Corresponding source archives and build
+instructions are in Third-party-source beside the app folder in the release ZIP.
+AeroDesk source can be rebuilt against a modified importer. Replace the files in
+resources/app.asar.unpacked/vendor or rebuild using build.cjs; reverse engineering for debugging modifications
+to these libraries is permitted. The JS loader is renamed to .cjs only.
+
+Manifold 3.5.4: Apache-2.0, https://github.com/elalish/manifold
+fflate 0.8.3: MIT, https://github.com/101arrowz/fflate
+@xmldom/xmldom 0.9.12: MIT, https://github.com/xmldom/xmldom
+Full licenses are in vendor/licenses.
+
+
+Optional GPU CFD runtime (installed separately): OpenFOAM.com v2512 (GPLv3),
+PETSc v3.24.1 (BSD-2-Clause), PETSc petsc4Foam adapter (see upstream LICENSE),
+CUDA toolkit 12.0 (NVIDIA license), OpenMPI, BLAS/LAPACK and Ubuntu packages.
+Upstream sources and their licenses remain in /opt/aerodesk in Ubuntu-24.04.
+Onshape material property values: official Onshape material-library reference,
+retrieved 2026-10-27. Source URL accompanies src/onshape-materials.json.

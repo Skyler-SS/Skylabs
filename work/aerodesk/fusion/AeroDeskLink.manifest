@@ -1,0 +1,1 @@
+{"autodeskProduct":"Fusion360","type":"addin","id":"09d4c4d8-f62c-4bf2-9d30-ec55cd85f1cc","author":"AeroDesk","description":{"":"Send the active design to AeroDesk on this PC as STEP."},"version":"1.0.0","runOnStartup":true,"supportedOS":"windows","editEnabled":true}
