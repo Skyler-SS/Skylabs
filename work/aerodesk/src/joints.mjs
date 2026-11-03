@@ -151,10 +151,72 @@ function matedFrame(entity){
 
 const text=(v,fallback,max=120)=>(typeof v==='string'&&v.trim()?v.trim():fallback).slice(0,max);
 
+// A sub-assembly is identified by the document, element and configuration it came
+// from. Instances reference the same four fields, which is how an instance is paired
+// with its definition. The microversion is matched when both sides report one, and
+// ignored when they disagree, because version- and microversion-pinned references
+// name the same element.
+function assemblyKeys(o){
+ const base=[o.documentId||'',o.elementId||'',o.configuration||''].join('|');
+ const stamp=o.documentMicroversion||o.documentVersion||'';
+ return stamp?[stamp+'|'+base,base]:[base];
+}
+
+function instanceRecord(i){
+ return {
+  id:i.id,name:text(i.name,'Instance',250),type:text(i.type,'Unknown',40),
+  partId:typeof i.partId==='string'?i.partId:null,
+  documentId:typeof i.documentId==='string'?i.documentId:null,
+  documentMicroversion:typeof i.documentMicroversion==='string'?i.documentMicroversion:null,
+  elementId:typeof i.elementId==='string'?i.elementId:null,
+  configuration:typeof i.configuration==='string'?i.configuration:null,
+ };
+}
+
+const MAX_ASSEMBLY_DEPTH=16;
+
+// Onshape returns only the ROOT assembly's instances and mates in `rootAssembly`;
+// everything nested lives in `subAssemblies`, keyed by document and element rather
+// than by position. Walking the tree flattens both.
+//
+// A sub-assembly instanced more than once (a left and a right arm from one arm
+// assembly) is walked once per instance, so each copy contributes its own joints and
+// the two arms move independently.
+function expandTree(definition,root){
+ const subs=new Map();
+ for(const sub of definition.subAssemblies||[]){
+  if(!sub||typeof sub!=='object')continue;
+  for(const key of assemblyKeys(sub))if(!subs.has(key))subs.set(key,sub);
+ }
+ const instances=new Map(),features=[];
+ let truncated=false;
+
+ const walk=(node,path,names,depth,chain)=>{
+  if(depth>MAX_ASSEMBLY_DEPTH){truncated=true;return;}
+  for(const f of node.features||[])features.push({prefix:path,names,feature:f});
+  for(const i of node.instances||[]){
+   if(!i||typeof i.id!=='string')continue;
+   const childPath=[...path,i.id],record=instanceRecord(i);
+   instances.set(childPath.join('/'),record);
+   if(record.type!=='Assembly')continue;
+   const sub=assemblyKeys(record).map(k=>subs.get(k)).find(Boolean);
+   if(!sub)continue;
+   // An assembly that contains itself would otherwise recurse for ever.
+   const id=assemblyKeys(record)[0];
+   if(chain.has(id))continue;
+   walk(sub,childPath,[...names,record.name],depth+1,new Set(chain).add(id));
+  }
+ };
+ walk(root,[],[],0,new Set());
+ return {instances,features,truncated};
+}
+
 export function readAssembly(definition){
  const root=definition&&definition.rootAssembly;
  if(!root||typeof root!=='object')throw Error('Onshape returned no assembly definition.');
 
+ // Occurrences are already flat: every one carries its full path from the root and
+ // an absolute transform, nested parts included.
  const occurrences=(root.occurrences||[])
   .filter(o=>o&&Array.isArray(o.path)&&o.path.length&&Array.isArray(o.transform)&&o.transform.length===16
    &&o.transform.every(v=>Number.isFinite(Number(v))))
@@ -162,36 +224,33 @@ export function readAssembly(definition){
    transform:o.transform.map(Number),hidden:!!o.hidden}));
  if(!occurrences.length)throw Error('This assembly has no placed instances.');
 
- const instances=new Map();
- for(const i of root.instances||[]){
-  if(!i||typeof i.id!=='string')continue;
-  instances.set(i.id,{
-   id:i.id,name:text(i.name,'Instance',250),type:text(i.type,'Unknown',40),
-   partId:typeof i.partId==='string'?i.partId:null,
-   documentId:typeof i.documentId==='string'?i.documentId:null,
-   documentMicroversion:typeof i.documentMicroversion==='string'?i.documentMicroversion:null,
-   elementId:typeof i.elementId==='string'?i.elementId:null,
-   configuration:typeof i.configuration==='string'?i.configuration:null,
-  });
- }
-
+ const {instances,features,truncated}=expandTree(definition,root);
  const saved=new Map(occurrences.map(o=>[o.key,o.transform]));
  const joints=[];
- for(const f of root.features||[]){
-  const d=f&&f.featureData;if(!d)continue;
+
+ for(const {prefix,names,feature} of features){
+  const d=feature&&feature.featureData;if(!d)continue;
   const type=MATE_TYPES[enumValue(d,'mateType').toUpperCase()];
   if(!type)continue;
+  // A mate inside a sub-assembly names occurrences relative to that sub-assembly, so
+  // its paths are prefixed by the path at which this copy of it is placed. Root
+  // mates have an empty prefix and already carry full paths.
   const sides=(d.matedEntities||[])
    .map(e=>{
     const frame=matedFrame(e);if(!frame)return null;
-    const path=(e.matedOccurrence||[]).map(String);
+    const path=[...prefix,...(e.matedOccurrence||[]).map(String)];
     return {path,key:path.join('/'),origin:frame.origin,axis:frame.axis};
    })
    .filter(Boolean);
   if(sides.length<2)continue;
+  const scope=prefix.join('/');
   joints.push({
-   id:text(f.id,'mate-'+joints.length,80),
-   name:text(d.name,type,120),
+   // Each placement of a sub-assembly gets its own joint, so the id has to carry the
+   // path as well as the feature id.
+   id:(scope?scope+'::':'')+text(feature.id,'mate-'+joints.length,80),
+   name:(names.length?names.join(' / ')+' / ':'')+text(d.name,type,120),
+   scope:scope||null,
+   depth:prefix.length,
    type,
    drivable:!!DRIVABLE[type],
    limits:limitsFor(d,type),
@@ -201,7 +260,8 @@ export function readAssembly(definition){
   });
  }
 
- return {occurrences,instances,joints,savedTransform:key=>saved.get(key)||IDENTITY};
+ return {occurrences,instances,joints,truncated,
+  savedTransform:key=>saved.get(key)||IDENTITY};
 }
 
 // The leaf occurrences that carry geometry, each with everything needed to fetch its
@@ -209,11 +269,20 @@ export function readAssembly(definition){
 export function leafParts(assembly){
  const out=[];
  for(const o of assembly.occurrences){
-  const instance=assembly.instances.get(o.path[o.path.length-1]);
+  const instance=assembly.instances.get(o.key);
   if(!instance||instance.type!=='Part'||!instance.partId||!instance.elementId)continue;
   const source=[instance.documentId,instance.documentMicroversion,instance.elementId,
    instance.partId,instance.configuration||''].join('|');
-  out.push({key:o.key,path:o.path,name:instance.name,hidden:o.hidden,source,instance});
+  // The chain of sub-assembly names this part sits under, so the dialog can show
+  // "Right arm / Gripper" rather than a bare part name repeated many times.
+  const under=[];
+  for(let i=1;i<o.path.length;i++){
+   const parent=assembly.instances.get(o.path.slice(0,i).join('/'));
+   if(parent)under.push(parent.name);
+  }
+  out.push({key:o.key,path:o.path,name:instance.name,under,
+   label:under.length?under.join(' / ')+' / '+instance.name:instance.name,
+   hidden:o.hidden,source,instance});
  }
  return out;
 }

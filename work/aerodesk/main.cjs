@@ -84,7 +84,10 @@ ipcMain.handle('onshape-import',async(_event,link)=>{
 // An Assembly tab is imported as its individual parts plus the solved occurrence
 // transforms, not as one flattened mesh, so joints can be driven locally afterwards.
 // Nothing here ever writes back to Onshape.
-const ASSEMBLY_MAX_SOURCES=64,ASSEMBLY_MAX_OCCURRENCES=400,ASSEMBLY_MAX_BYTES=512*1024*1024;
+// Nested sub-assemblies are walked, so a whole robot arrives at once. Repeated
+// hardware shares one download, which makes distinct parts - not placements - the
+// real cost, so the two caps are set far apart.
+const ASSEMBLY_MAX_SOURCES=250,ASSEMBLY_MAX_OCCURRENCES=2000,ASSEMBLY_MAX_BYTES=512*1024*1024;
 ipcMain.handle('onshape-assembly',async(_event,link)=>{
   const keys=await readKeys();
   if(!keys)throw Error('Connect Onshape first.');
@@ -94,7 +97,7 @@ ipcMain.handle('onshape-assembly',async(_event,link)=>{
   const assembly=readAssembly(definition);
   const parts=leafParts(assembly);
   if(!parts.length)throw Error('This assembly contains no solid parts to import.');
-  if(parts.length>ASSEMBLY_MAX_OCCURRENCES)throw Error('This assembly places '+parts.length+' parts. Import a sub-assembly of up to '+ASSEMBLY_MAX_OCCURRENCES+'.');
+  if(parts.length>ASSEMBLY_MAX_OCCURRENCES)throw Error('This assembly places '+parts.length+' parts, over the limit of '+ASSEMBLY_MAX_OCCURRENCES+'. Import a sub-assembly instead.');
   // Repeated hardware shares one source key, so N identical screws download once.
   const unique=new Map();
   for(const part of parts)if(!unique.has(part.source))unique.set(part.source,part.instance);
@@ -109,7 +112,8 @@ ipcMain.handle('onshape-assembly',async(_event,link)=>{
     if(!_event.sender.isDestroyed())_event.sender.send('assembly-progress',{done,total:unique.size,name:instance.name});
   }
   return {definition,meshes,link:target.link,workspace:target.workspace,
-    name:'Onshape assembly '+target.element.slice(0,6),occurrences:parts.length,sources:unique.size};
+    name:'Onshape assembly '+target.element.slice(0,6),occurrences:parts.length,sources:unique.size,
+    subAssemblies:(definition.subAssemblies||[]).length,truncated:!!assembly.truncated};
 });
 ipcMain.handle('onshape-help',async()=>shell.openExternal('https://cad.onshape.com/help/Content/Plans/my_account_developer.htm'));
 // The data folder keeps its original name so saved settings, stored Onshape keys and

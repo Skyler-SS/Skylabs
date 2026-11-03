@@ -369,8 +369,10 @@ function updatePreview(){
     else{p.center.set(0,0,0);p.fit=1;}
   }
   const triangles=merged.length/9,included=chunks.length;
+  const nested=new Set(assemblyState.parts.filter(p=>p.under.length).map(p=>p.under.join('/')));
   $('assemblyStats').textContent=included+' of '+assemblyState.parts.length+' parts · '
     +triangles.toLocaleString()+' triangles'
+    +(nested.size?' · '+nested.size+' sub-assembl'+(nested.size===1?'y':'ies')+' included':'')
     +(triangles>DECIMATE_TARGET_TRIANGLES?' · will be simplified on import':'');
   $('applyAssembly').disabled=!included;
   drawPreview();
@@ -391,7 +393,8 @@ function limitText(joint,dof){
 function renderJoints(){
   const list=$('jointList'),joints=assemblyState.assembly.joints;
   list.textContent='';
-  const drivable=joints.filter(j=>j.drivable&&j.resolved);
+  const drivable=joints.filter(j=>j.drivable&&j.resolved)
+    .sort((a,b)=>(a.scope||'').localeCompare(b.scope||''));
   if(!drivable.length){
     const p=document.createElement('p');p.className='small';
     p.textContent=joints.length
@@ -399,10 +402,23 @@ function renderJoints(){
       :'Onshape reported no mates for this assembly. Import it as-is.';
     list.append(p);
   }
+  let lastScope;
   for(const joint of drivable){
+    if(joint.scope!==lastScope){
+      lastScope=joint.scope;
+      if(joint.scope){
+        const group=document.createElement('div');group.className='joint-group';
+        // The joint name already carries the full chain, so the heading is enough.
+        group.textContent=joint.name.split(' / ').slice(0,-1).join(' / ');
+        list.append(group);
+      }
+    }
     const row=document.createElement('div');row.className='joint-row';
     const head=document.createElement('div');head.className='joint-head';
-    const name=document.createElement('b');name.textContent=joint.name;
+    const name=document.createElement('b');
+    // Inside a group the chain is already shown above, so only the mate name repeats.
+    name.textContent=joint.scope?joint.name.split(' / ').pop():joint.name;
+    name.title=joint.name;
     const kind=document.createElement('span');kind.textContent=describeJoint(joint);
     head.append(name,kind);row.append(head);
 
@@ -466,7 +482,8 @@ function renderParts(){
     const box=document.createElement('input');box.type='checkbox';box.checked=part.include;
     box.onchange=()=>{part.include=box.checked;renderParts();schedulePreview();};
     const name=document.createElement('span');
-    name.textContent=part.name+(part.path.length>1?' · '+part.path.slice(0,-1).length+' level(s) deep':'');
+    name.textContent=part.label;
+    name.title=part.label;
     row.append(box,name);list.append(row);
   }
 }
@@ -990,22 +1007,38 @@ window.qaAssembly=async()=>{
   return new Uint8Array(buf);
  };
  const T4=(x,y,z)=>[1,0,0,x,0,1,0,y,0,0,1,z,0,0,0,1];
- const definition={rootAssembly:{
-  instances:[
-   {id:'wing',name:'Wing',type:'Part',partId:'PW',documentId:'a'.repeat(24),documentMicroversion:'d'.repeat(24),elementId:'c'.repeat(24)},
-   {id:'aileron',name:'Aileron',type:'Part',partId:'PA',documentId:'a'.repeat(24),documentMicroversion:'d'.repeat(24),elementId:'c'.repeat(24)},
-  ],
-  occurrences:[{path:['wing'],transform:T4(0,0,0)},{path:['aileron'],transform:T4(.35,0,0)}],
-  features:[{id:'hinge',featureData:{name:'Aileron hinge',
-   parameters:[{parameterId:'mateType',value:'REVOLUTE'},{parameterId:'mateLimitsEnabled',value:true},
-    {parameterId:'limitAxialZMin',expression:'-25 deg'},{parameterId:'limitAxialZMax',expression:'25 deg'}],
-   matedEntities:[
-    {matedOccurrence:['aileron'],matedCS:{origin:[.25,0,0],xAxis:[1,0,0],yAxis:[0,0,1],zAxis:[0,1,0]}},
-    {matedOccurrence:['wing'],matedCS:{origin:[.25,0,0],xAxis:[1,0,0],yAxis:[0,0,1],zAxis:[0,1,0]}}]}}],
- }};
+ const D='a'.repeat(24),M='d'.repeat(24),E='c'.repeat(24),EW='e'.repeat(24);
+ const part=(id,name,partId)=>({id,name,type:'Part',partId,documentId:D,documentMicroversion:M,elementId:E});
+ const hinge=()=>({id:'hinge',featureData:{name:'Aileron hinge',
+  parameters:[{parameterId:'mateType',value:'REVOLUTE'},{parameterId:'mateLimitsEnabled',value:true},
+   {parameterId:'limitAxialZMin',expression:'-25 deg'},{parameterId:'limitAxialZMax',expression:'25 deg'}],
+  matedEntities:[
+   {matedOccurrence:['aileron'],matedCS:{origin:[.25,0,0],xAxis:[1,0,0],yAxis:[0,0,1],zAxis:[0,1,0]}},
+   {matedOccurrence:['wing'],matedCS:{origin:[.25,0,0],xAxis:[1,0,0],yAxis:[0,0,1],zAxis:[0,1,0]}}]}});
+ // Two placements of one wing sub-assembly, each carrying its own internal hinge.
+ const definition={
+  rootAssembly:{
+   instances:[
+    {id:'wingL',name:'Left wing',type:'Assembly',documentId:D,documentMicroversion:M,elementId:EW},
+    {id:'wingR',name:'Right wing',type:'Assembly',documentId:D,documentMicroversion:M,elementId:EW},
+   ],
+   occurrences:[
+    {path:['wingL'],transform:T4(0,0,0)},
+    {path:['wingL','wing'],transform:T4(0,0,0)},
+    {path:['wingL','aileron'],transform:T4(.35,0,0)},
+    {path:['wingR'],transform:T4(0,.6,0)},
+    {path:['wingR','wing'],transform:T4(0,.6,0)},
+    {path:['wingR','aileron'],transform:T4(.35,.6,0)},
+   ],
+   features:[],
+  },
+  subAssemblies:[{documentId:D,documentMicroversion:M,elementId:EW,
+   instances:[part('wing','Wing','PW'),part('aileron','Aileron','PA')],
+   features:[hinge()]}],
+ };
  const meshes={};
- meshes[['a'.repeat(24),'d'.repeat(24),'c'.repeat(24),'PW',''].join('|')]=boxSTL(.5,.4,.06);
- meshes[['a'.repeat(24),'d'.repeat(24),'c'.repeat(24),'PA',''].join('|')]=boxSTL(.2,.38,.04);
+ meshes[[D,M,E,'PW',''].join('|')]=boxSTL(.5,.4,.06);
+ meshes[[D,M,E,'PA',''].join('|')]=boxSTL(.2,.38,.04);
 
  window.__qaStep='installAssembly';
  installAssembly({definition,meshes,link:null,workspace:true,name:'QA assembly'},'QA assembly');
@@ -1013,26 +1046,32 @@ window.qaAssembly=async()=>{
  $('assemblyDialog').showModal();
  window.__qaStep='posed';
  const joints=assemblyState.assembly.joints;
+ const ids=joints.filter(j=>j.drivable).map(j=>j.id).sort();
+ const tip=(c,i)=>Math.max(...Array.from({length:c[i].length/3},(_,k)=>c[i][k*3+2]));
  const rest=assemblyChunks();
- const restTip=Math.max(...Array.from({length:rest[1].length/3},(_,i)=>rest[1][i*3+2]));
+ const restTip=tip(rest,1);
 
- // Drive the hinge past its limit; the stored value must come back clamped.
- assemblyState.values.hinge={angle:60};
+ // Drive only the LEFT hinge, past its limit, so clamping and independence are both
+ // exercised. Parts order: wingL/wing, wingL/aileron, wingR/wing, wingR/aileron.
+ assemblyState.values[ids[0]]={angle:60};
  renderJoints();updatePreview();
  const posed=assemblyChunks();
- const posedTip=Math.max(...Array.from({length:posed[1].length/3},(_,i)=>posed[1][i*3+2]));
+ const posedTip=tip(posed,1);
  const stored=normalizeConfiguration(assemblyState.assembly,assemblyState.values);
 
- // The wing must not have moved.
+ // The wing it hangs off must not move, and nor must the other wing's aileron.
  let wingMoved=0;
  for(let i=0;i<rest[0].length;i++)wingMoved=Math.max(wingMoved,Math.abs(rest[0][i]-posed[0][i]));
+ let otherMoved=0;
+ for(let i=0;i<rest[3].length;i++)otherMoved=Math.max(otherMoved,Math.abs(rest[3][i]-posed[3][i]));
 
  window.__qaStep='settle';
  await new Promise(r=>setTimeout(r,50));
  window.__qaStep='collect';
  const shot={joints:joints.length,drivable:joints.filter(j=>j.drivable).length,
-  parts:assemblyState.parts.length,restTip,posedTip,wingMoved,
-  storedAngle:stored.hinge&&stored.hinge.angle,
+  parts:assemblyState.parts.length,restTip,posedTip,wingMoved,otherMoved,
+  jointIds:ids,partLabels:assemblyState.parts.map(p=>p.label),
+  storedAngle:stored[ids[0]]&&stored[ids[0]].angle,
   stats:$('assemblyStats').textContent,
   jointRows:document.querySelectorAll('#jointList .joint-row').length,
   partRows:document.querySelectorAll('#partList .part-row').length};
@@ -1041,7 +1080,7 @@ window.qaAssembly=async()=>{
  $('configName').value='aileron 25';$('saveConfig').click();
  assemblyState.values={};renderJoints();
  document.querySelector('#configList .config-row button').click();
- shot.restoredAngle=assemblyState.values.hinge&&assemblyState.values.hinge.angle;
+ shot.restoredAngle=assemblyState.values[ids[0]]&&assemblyState.values[ids[0]].angle;
  shot.configRows=document.querySelectorAll('#configList .config-row').length;
  window.__qaShot=shot;
 
@@ -1061,9 +1100,12 @@ window.qaAssemblyApply=async()=>{
  shot.triangles=state.base.attributes.position.count/3;
  shot.cleanupReady=!!state.cleanup.ready;
  shot.configuration=state.jointConfiguration;
- shot.ok=shot.drivable===1&&shot.jointRows===1&&shot.partRows===2&&shot.imported
-  &&shot.storedAngle===25&&shot.restoredAngle===25&&shot.wingMoved<1e-9
-  &&Math.abs(shot.posedTip-shot.restTip)>.01;
+ shot.ok=shot.drivable===2&&shot.jointRows===2&&shot.partRows===4&&shot.imported
+  &&shot.storedAngle===25&&shot.restoredAngle===25
+  &&shot.wingMoved<1e-9&&shot.otherMoved<1e-9
+  &&Math.abs(shot.posedTip-shot.restTip)>.01
+  &&shot.partLabels[0]==='Left wing / Wing'
+  &&shot.jointIds[0]==='wingL::hinge'&&shot.jointIds[1]==='wingR::hinge';
  return shot;
 };
 

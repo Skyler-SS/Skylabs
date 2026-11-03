@@ -54,47 +54,62 @@ test('quantities parse their units, and anything ambiguous becomes no limit', ()
 //   tip       part of the arm's subtree, further out along +X
 //   slide     a slider on `tip` alone, along +X
 function definition() {
- return {rootAssembly:{
-  instances:[
-   {id:'base',name:'Base',type:'Part',partId:'P1',documentId:'D',documentMicroversion:'M',elementId:'E'},
-   {id:'arm',name:'Arm',type:'Assembly',documentId:'D',documentMicroversion:'M',elementId:'EA'},
-   {id:'armPart',name:'Arm body',type:'Part',partId:'P2',documentId:'D',documentMicroversion:'M',elementId:'E'},
-   {id:'tip',name:'Tip',type:'Part',partId:'P3',documentId:'D',documentMicroversion:'M',elementId:'E'},
-  ],
-  occurrences:[
-   {path:['base'],transform:IDENTITY.slice()},
-   {path:['arm'],transform:IDENTITY.slice()},
-   {path:['arm','armPart'],transform:translate(1,0,0)},
-   {path:['arm','tip'],transform:translate(3,0,0)},
-  ],
-  features:[
-   {id:'hinge',featureData:{
-    name:'Elbow',
-    parameters:[{parameterId:'mateType',value:'REVOLUTE'},
-     {parameterId:'mateLimitsEnabled',value:true},
-     {parameterId:'limitAxialZMin',expression:'-120 deg'},
-     {parameterId:'limitAxialZMax',expression:'120 deg'}],
-    matedEntities:[
-     {matedOccurrence:['arm'],matedCS:{origin:[1,0,0],xAxis:[1,0,0],yAxis:[0,1,0],zAxis:[0,0,1]}},
-     {matedOccurrence:['base'],matedCS:{origin:[1,0,0],xAxis:[1,0,0],yAxis:[0,1,0],zAxis:[0,0,1]}},
-    ]}},
-   {id:'slide',featureData:{
-    name:'Extension',
-    parameters:[{parameterId:'mateType',value:'SLIDER'}],
-    matedEntities:[
-     {matedOccurrence:['arm','tip'],matedCS:{origin:[0,0,0],xAxis:[0,1,0],yAxis:[0,0,1],zAxis:[1,0,0]}},
-     {matedOccurrence:['arm','armPart'],matedCS:{origin:[0,0,0],xAxis:[0,1,0],yAxis:[0,0,1],zAxis:[1,0,0]}},
-    ]}},
-   {id:'bolted',featureData:{
-    name:'Cover screw',
-    parameters:[{parameterId:'mateType',value:'FASTENED'}],
-    matedEntities:[
-     {matedOccurrence:['base'],matedCS:{origin:[0,0,0],xAxis:[1,0,0],yAxis:[0,1,0],zAxis:[0,0,1]}},
-     {matedOccurrence:['arm'],matedCS:{origin:[0,0,0],xAxis:[1,0,0],yAxis:[0,1,0],zAxis:[0,0,1]}},
-    ]}},
-  ],
- }};
+ return {
+  rootAssembly:{
+   instances:[
+    {id:'base',name:'Base',type:'Part',partId:'P1',documentId:'D',documentMicroversion:'M',elementId:'E'},
+    {id:'arm',name:'Arm',type:'Assembly',documentId:'D',documentMicroversion:'M',elementId:'EA'},
+   ],
+   // Occurrences are flat and absolute: nested parts appear here with their full path.
+   occurrences:[
+    {path:['base'],transform:IDENTITY.slice()},
+    {path:['arm'],transform:IDENTITY.slice()},
+    {path:['arm','armPart'],transform:translate(1,0,0)},
+    {path:['arm','tip'],transform:translate(3,0,0)},
+   ],
+   features:[
+    {id:'hinge',featureData:{
+     name:'Elbow',
+     parameters:[{parameterId:'mateType',value:'REVOLUTE'},
+      {parameterId:'mateLimitsEnabled',value:true},
+      {parameterId:'limitAxialZMin',expression:'-120 deg'},
+      {parameterId:'limitAxialZMax',expression:'120 deg'}],
+     matedEntities:[
+      {matedOccurrence:['arm'],matedCS:{origin:[1,0,0],xAxis:[1,0,0],yAxis:[0,1,0],zAxis:[0,0,1]}},
+      {matedOccurrence:['base'],matedCS:{origin:[1,0,0],xAxis:[1,0,0],yAxis:[0,1,0],zAxis:[0,0,1]}},
+     ]}},
+    {id:'bolted',featureData:{
+     name:'Cover screw',
+     parameters:[{parameterId:'mateType',value:'FASTENED'}],
+     matedEntities:[
+      {matedOccurrence:['base'],matedCS:{origin:[0,0,0],xAxis:[1,0,0],yAxis:[0,1,0],zAxis:[0,0,1]}},
+      {matedOccurrence:['arm'],matedCS:{origin:[0,0,0],xAxis:[1,0,0],yAxis:[0,1,0],zAxis:[0,0,1]}},
+     ]}},
+   ],
+  },
+  // The arm's own parts and its own slider mate live here, not in rootAssembly, and
+  // the mate names occurrences relative to this sub-assembly.
+  subAssemblies:[{
+   documentId:'D',documentMicroversion:'M',elementId:'EA',
+   instances:[
+    {id:'armPart',name:'Arm body',type:'Part',partId:'P2',documentId:'D',documentMicroversion:'M',elementId:'E'},
+    {id:'tip',name:'Tip',type:'Part',partId:'P3',documentId:'D',documentMicroversion:'M',elementId:'E'},
+   ],
+   features:[
+    {id:'slide',featureData:{
+     name:'Extension',
+     parameters:[{parameterId:'mateType',value:'SLIDER'}],
+     matedEntities:[
+      {matedOccurrence:['tip'],matedCS:{origin:[0,0,0],xAxis:[0,1,0],yAxis:[0,0,1],zAxis:[1,0,0]}},
+      {matedOccurrence:['armPart'],matedCS:{origin:[0,0,0],xAxis:[0,1,0],yAxis:[0,0,1],zAxis:[1,0,0]}},
+     ]}},
+   ],
+  }],
+ };
 }
+
+// A mate defined inside a sub-assembly is scoped by the path it is placed at.
+const SLIDE='arm::slide';
 
 test('mates are read by parameterId, with fastened listed but not drivable', () => {
  const a=readAssembly(definition());
@@ -155,14 +170,14 @@ test('a joint inside a moved subassembly is carried by the outer joint', () => {
  const a=readAssembly(definition());
 
  // The slider alone pushes the tip a further 500 mm along +X.
- const slid=poseMatrices(a,{slide:{offset:500}});
+ const slid=poseMatrices(a,{[SLIDE]:{offset:500}});
  closeVec(transformPoint(slid.get('arm/tip'),[0,0,0]),[3.5,0,0],1e-12);
  closeVec(transformPoint(slid.get('arm/armPart'),[0,0,0]),[1,0,0],1e-12,
   'the slider must not drag its other side along');
 
  // With the elbow at 90 deg as well, the slide has to follow the rotated arm:
  // the tip starts 2 m out, slides to 2.5 m out, then swings about (1,0,0) to +Y.
- const both=poseMatrices(a,{hinge:{angle:90},slide:{offset:500}});
+ const both=poseMatrices(a,{hinge:{angle:90},[SLIDE]:{offset:500}});
  closeVec(transformPoint(both.get('arm/tip'),[0,0,0]),[1,2.5,0],1e-12);
 });
 
@@ -179,7 +194,7 @@ test('limits clamp a driven value rather than being ignored', () => {
  closeVec(posed.get('arm/tip'),clamped.get('arm/tip'),1e-12);
 
  // A slider with no limits reported stays free.
- const slide=a.joints.find(j=>j.id==='slide');
+ const slide=a.joints.find(j=>j.id===SLIDE);
  assert.deepEqual(slide.limits,{});
  close(clampValue(slide,'offset',12345),12345);
 });
@@ -194,7 +209,7 @@ test('flipping a joint drives the other side instead', () => {
 
 test('a configuration records only joints actually moved, already clamped', () => {
  const a=readAssembly(definition());
- const saved=normalizeConfiguration(a,{hinge:{angle:200},slide:{offset:0},bolted:{angle:20}});
+ const saved=normalizeConfiguration(a,{hinge:{angle:200},[SLIDE]:{offset:0},bolted:{angle:20}});
  assert.deepEqual(Object.keys(saved),['hinge'],'untouched and non-drivable joints are dropped');
  close(saved.hinge.angle,120,0,'the stored value is the clamped one');
 
@@ -248,4 +263,119 @@ test('the axis is taken in assembly space, not in the part frame', () => {
  const {axis,origin}=jointAxis(a,a.joints.find(j=>j.id==='hinge'));
  closeVec(axis,[0,-1,0],1e-12);
  closeVec(origin,[1,0,0],1e-12);
+});
+
+// --- Nested sub-assemblies --------------------------------------------------------
+// The shape that matters in practice: a robot whose top assembly places an arm
+// assembly twice, where the arm has its own internal mates.
+function robot() {
+ const d=definition();
+ d.rootAssembly.instances.push(
+  {id:'armR',name:'Right arm',type:'Assembly',documentId:'D',documentMicroversion:'M',elementId:'EA'});
+ d.rootAssembly.occurrences.push(
+  {path:['armR'],transform:translate(0,10,0)},
+  {path:['armR','armPart'],transform:translate(1,10,0)},
+  {path:['armR','tip'],transform:translate(3,10,0)});
+ return d;
+}
+
+test('parts and mates inside a sub-assembly are imported, not skipped', () => {
+ const a=readAssembly(definition());
+
+ // Nested parts resolve through their full path; the sub-assembly itself is not
+ // geometry.
+ assert.deepEqual(leafParts(a).map(p=>p.key).sort(),['arm/armPart','arm/tip','base']);
+
+ // The slider lives in the sub-assembly's own feature list. It must be found, and
+ // its occurrence paths must be rebased onto where that sub-assembly sits.
+ const slide=a.joints.find(j=>j.id===SLIDE);
+ assert.ok(slide,'a mate defined inside a sub-assembly must still be read');
+ assert.equal(slide.type,'slider');
+ assert.deepEqual(slide.sides.map(s=>s.key),['arm/tip','arm/armPart']);
+ assert.equal(slide.resolved,true,'rebased paths must match real occurrences');
+ // The name says which sub-assembly it came from.
+ assert.equal(slide.name,'Arm / Extension');
+ assert.equal(slide.depth,1);
+});
+
+test('a sub-assembly placed twice gives each copy its own independent joints', () => {
+ const a=readAssembly(robot());
+
+ // Both arms contribute geometry.
+ assert.deepEqual(leafParts(a).map(p=>p.key).sort(),
+  ['arm/armPart','arm/tip','armR/armPart','armR/tip','base']);
+
+ // One slider per placement, distinctly identified and named.
+ const sliders=a.joints.filter(j=>j.type==='slider');
+ assert.equal(sliders.length,2,'each placement of the arm has its own slider');
+ assert.deepEqual(sliders.map(j=>j.id).sort(),['arm::slide','armR::slide']);
+ assert.deepEqual(sliders.map(j=>j.name).sort(),['Arm / Extension','Right arm / Extension']);
+ assert.ok(sliders.every(j=>j.resolved));
+
+ // Driving the left arm must leave the right one alone.
+ const posed=poseMatrices(a,{'arm::slide':{offset:500}});
+ closeVec(transformPoint(posed.get('arm/tip'),[0,0,0]),[3.5,0,0],1e-12);
+ closeVec(transformPoint(posed.get('armR/tip'),[0,0,0]),[3,10,0],1e-12,
+  'the other copy of the same sub-assembly must not move');
+
+ // And identical parts across both arms still share one download.
+ assert.equal(new Set(leafParts(a).map(p=>p.source)).size,3);
+});
+
+test('only revolute, slider and cylindrical are drivable; fastened is structure', () => {
+ const types=['REVOLUTE','SLIDER','CYLINDRICAL','FASTENED','PLANAR','BALL','PIN_SLOT'];
+ const d=definition();
+ d.subAssemblies[0].features=[];
+ d.rootAssembly.features=types.map((t,i)=>({id:'m'+i,featureData:{
+  name:t,parameters:[{parameterId:'mateType',value:t}],
+  matedEntities:[
+   {matedOccurrence:['arm'],matedCS:{origin:[0,0,0],xAxis:[1,0,0],yAxis:[0,1,0],zAxis:[0,0,1]}},
+   {matedOccurrence:['base'],matedCS:{origin:[0,0,0],xAxis:[1,0,0],yAxis:[0,1,0],zAxis:[0,0,1]}},
+  ]}}));
+ const a=readAssembly(d);
+ const drivable=a.joints.filter(j=>j.drivable).map(j=>j.type).sort();
+ assert.deepEqual(drivable,['cylindrical','revolute','slider'],
+  'every revolute, slider and cylindrical mate is drivable, and nothing else is');
+ // The rest are still reported, so the structure is visible rather than silently lost.
+ assert.equal(a.joints.length,types.length);
+ assert.equal(a.joints.find(j=>j.type==='fastened').drivable,false);
+});
+
+test('a cylindrical mate drives rotation and translation on the same axis', () => {
+ const d=definition();
+ d.subAssemblies[0].features=[];
+ d.rootAssembly.features=[{id:'cyl',featureData:{
+  name:'Telescope',parameters:[{parameterId:'mateType',value:'CYLINDRICAL'}],
+  matedEntities:[
+   {matedOccurrence:['arm'],matedCS:{origin:[1,0,0],xAxis:[0,1,0],yAxis:[0,0,1],zAxis:[1,0,0]}},
+   {matedOccurrence:['base'],matedCS:{origin:[1,0,0],xAxis:[0,1,0],yAxis:[0,0,1],zAxis:[1,0,0]}},
+  ]}}];
+ const a=readAssembly(d);
+ assert.deepEqual(DRIVABLE[a.joints[0].type],['angle','offset']);
+ // Spin 90 deg about +X and slide 250 mm along it: the tip at (3,0,0) slides to
+ // (3.25,0,0) and the spin leaves it on the axis.
+ const posed=poseMatrices(a,{cyl:{angle:90,offset:250}});
+ closeVec(transformPoint(posed.get('arm/tip'),[0,0,0]),[3.25,0,0],1e-12);
+ // A point off the axis does rotate.
+ closeVec(transformPoint(posed.get('arm/tip'),[0,1,0]),[3.25,0,1],1e-12);
+});
+
+test('a self-referencing assembly is bounded instead of recursing for ever', () => {
+ const d=definition();
+ // The arm sub-assembly places itself.
+ d.subAssemblies[0].instances.push(
+  {id:'inner',name:'Arm again',type:'Assembly',documentId:'D',documentMicroversion:'M',elementId:'EA'});
+ let a;
+ assert.doesNotThrow(()=>{a=readAssembly(d);});
+ assert.ok(a.joints.length<50,'cycle guard must stop the walk');
+});
+
+test('a sub-assembly Onshape did not return is skipped, not fatal', () => {
+ const d=definition();
+ d.subAssemblies=[];
+ const a=readAssembly(d);
+ // Its parts have no instance record, so they contribute no geometry...
+ assert.deepEqual(leafParts(a).map(p=>p.key),['base']);
+ // ...and only the root mates survive, without throwing.
+ assert.deepEqual(a.joints.map(j=>j.id).sort(),['bolted','hinge']);
 });
