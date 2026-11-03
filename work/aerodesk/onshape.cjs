@@ -29,7 +29,7 @@ async function request(url,keys,fetcher=fetch){
     }
     if(!response.ok){if(response.status===400){let reason='';try{const body=await response.json();reason=String(body.message||body.error||'').slice(0,400);for(const secret of [keys.access,keys.secret])if(secret)reason=reason.replaceAll(secret,'[redacted]');}catch{}throw Error('Onshape could not export this Part Studio. '+reason);}const messages={401:'Onshape rejected the API keys. Check the keys and your PC clock.',403:'This key cannot read that document. Enable read-document access and check document permissions.',404:'Part Studio not found. Assemblies are not supported in this prototype.',429:'Onshape API limit reached. Please try again later.'};throw Error(messages[response.status]||'Onshape returned HTTP '+response.status+'. Check the Part Studio link.');}
     const reader=response.body.getReader(),chunks=[];let length=0;
-    while(true){const {done,value}=await reader.read();if(done)break;length+=value.length;if(length>32*1024*1024){await reader.cancel();throw Error('The export exceeds 32 MB. Simplify the model in Onshape.');}chunks.push(value);}
+    while(true){const {done,value}=await reader.read();if(done)break;length+=value.length;if(length>512*1024*1024){await reader.cancel();throw Error('The export exceeds 512 MB. Simplify the model in Onshape.');}chunks.push(value);}
     return Buffer.concat(chunks);
   }
   throw Error('Onshape returned too many redirects.');

@@ -11,7 +11,7 @@ function register({app,ipcMain,safeStorage,shell}){
  const inbox=()=>path.join(home(),'FusionInbox');
  ipcMain.handle('fusion-install',async()=>{const folder=path.join(app.getPath('appData'),'Autodesk/Autodesk Fusion 360/API/AddIns/AeroDeskLink');await fs.mkdir(folder,{recursive:true});for(const f of ['AeroDeskLink.py','AeroDeskLink.manifest'])await fs.copyFile(path.join(__dirname,'fusion',f),path.join(folder,f));return {folder};});
  ipcMain.handle('fusion-status',async()=>{try{const info=JSON.parse(await fs.readFile(path.join(inbox(),'latest.json'),'utf8'));return {available:true,name:String(info.name).slice(0,200),exportedAt:info.exportedAt};}catch{return {available:false};}});
- ipcMain.handle('fusion-import',async()=>{const file=path.join(inbox(),'latest.step'),stat=await fs.stat(file).catch(()=>null);if(!stat)throw Error('In Fusion, run Send to AeroDesk first.');if(stat.size>32*1024*1024)throw Error('Fusion export exceeds 32 MB. Simplify it first.');return {name:'Fusion-design.step',bytes:new Uint8Array(await fs.readFile(file))};});
+ ipcMain.handle('fusion-import',async()=>{const file=path.join(inbox(),'latest.step'),stat=await fs.stat(file).catch(()=>null);if(!stat)throw Error('In Fusion, run Send to AeroDesk first.');if(stat.size>512*1024*1024)throw Error('Fusion export exceeds 512 MB. Simplify it first.');return {name:'Fusion-design.step',bytes:new Uint8Array(await fs.readFile(file))};});
  ipcMain.handle('open-api-keys',()=>shell.openExternal('https://platform.openai.com/api-keys'));
 }
 module.exports={register};
