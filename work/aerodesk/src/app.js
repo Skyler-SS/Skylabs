@@ -102,7 +102,46 @@ function installGeometry(geometry,name,source=null,physicalLength=null,prepared=
   $('modelName').textContent=state.name;$('studyTitle').textContent=state.name.replace(/\.(stl|obj)$/i,'')+' / flow study';$('modelDetails').textContent=(pos.count/3).toLocaleString()+' triangles · '+(source?'Onshape':'local model');$('refreshOnshape').classList.toggle('hidden',!source);
   invalidate();rebuildModel();updateFacts();resetView();showCleanup();
 }
-function showCleanup(){$('cleanupReport').classList.remove('hidden');const r=state.cleanup;if(!r)return;$('cleanupTitle').textContent=r.rebuiltExterior?'Exterior rebuilt · review geometry':r.ready?(r.changed?'Auto-cleaned · checks passed':'Auto-checked · no repair needed'):'Auto-cleaned · needs review';$('cleanupReport').classList.toggle('repair-needed',!r.ready);$('cleanupDetails').textContent=[(r.unionedParts?r.unionedParts+' solid parts joined. ':'')+r.inputFaces.toLocaleString()+' → '+r.outputFaces.toLocaleString()+' triangles',r.invalidFaces+' invalid, '+r.degenerateFaces+' collapsed and '+r.duplicateFaces+' duplicate faces removed',(r.strayFacesRemoved||0)+' tiny stray faces removed; '+(r.boundaryVerticesStitched||0)+' boundary vertices stitched', (r.microPatchesRebuilt||0)+' tiny intersecting patches rebuilt',r.weldedSeams+' near-seam corners joined; '+r.reorientedFaces+' faces reoriented',r.filledHoles+' small holes filled ('+r.addedFaces+' faces added)',r.components+' surface components retained',r.boundaryEdges+' open edges; '+r.nonManifoldEdges+' non-manifold edges; '+r.nonManifoldVertices+' non-manifold vertices',r.intersections+(r.intersections>=20?'+':'')+' overlapping face pairs detected',!r.intersectionCheckComplete?'Intersection scan limited; repair the model before running.':'Intersection scan completed.',r.ready?'Surface checks passed. OpenFOAM will check the surface again and the volume mesh when you run.':'Repair remaining openings / overlaps in CAD, then reimport.',r.filledHoles?'Review filled openings: even a small hole can be intentional.':'', r.unionNote||'Original file unchanged. Closed overlapping parts are automatically joined when possible.'].filter(Boolean).join('\n');$('cleanupReport').open=!r.ready;if(!r.ready){$('stateBadge').textContent='Model needs repair';$('status').textContent='Cleanup finished with unresolved geometry. Open the cleanup summary below the model.';}}
+// Seal size is held as a fraction of the longest dimension, so it means the same real
+// distance at any detail level; the rebuilder only ever sees a normalized model.
+// Millimetres are an entry and display convenience.
+function sealFractionInput(){
+  const choice=$('sealSize').value;
+  if(choice==='auto')return null;
+  if(choice!=='custom')return +choice;
+  const L=+$('length').value,mm=+$('sealMillimeters').value;
+  if(!Number.isFinite(L)||L<=0||!Number.isFinite(mm)||mm<=0)return null;
+  return Math.min(.1,mm/1000/L);
+}
+function wrapOptions(){
+  const options={mode:$('sealOpenings').checked?'wrap':'auto',resolution:+$('rebuildDetail').value};
+  const sealFraction=sealFractionInput();
+  if(sealFraction!==null)options.sealFraction=sealFraction;
+  return options;
+}
+function updateSealScale(){
+  $('sealCustom').classList.toggle('hidden',$('sealSize').value!=='custom');
+  const L=+$('length').value,resolution=+$('rebuildDetail').value;
+  if(!Number.isFinite(L)||L<=0||!Number.isFinite(resolution)){$('sealScale').textContent='';return;}
+  const cell=L/resolution*1000,fraction=sealFractionInput(),parts=['Cell size about '+cell.toPrecision(3)+' mm.'];
+  if(fraction===null)parts.push('Auto tries 0.25% to 2% of the model length in turn and stops at the first size that closes the surface.');
+  else{
+    const radius=Math.max(1,fraction*resolution);
+    parts.push('Closes openings up to about '+(2*radius*cell).toPrecision(3)+' mm ('+radius.toFixed(1)+' cells).');
+    if(fraction>.02)parts.push('That is over 2% of the model: check that control-surface slots, vents and duct inlets are not bridged.');
+  }
+  $('sealScale').textContent=parts.join(' ');
+}
+function rebuildSummary(report,L){
+  const mm=v=>(v*L*1000).toPrecision(3),parts=['Cell size about '+mm(report.rebuildSpacing)+' mm at '+report.rebuildResolution+' cells.'];
+  if(report.rebuildMethod==='wrap'){
+    const n=report.rebuildSealedOpenings||0;
+    parts.push('Sealed '+n+' opening'+(n===1?'':'s')+(report.rebuildSealedSpan?', largest about '+mm(report.rebuildSealedSpan)+' mm across':'')+', at a seal size of '+mm(report.rebuildSealCells*report.rebuildSpacing)+' mm.');
+    if(report.rebuildAutomaticWrap)parts.push('Sealing was applied automatically because the exact method could not resolve this surface.');
+  }else parts.push('Closed exactly, with nothing sealed.');
+  return parts.join(' ');
+}
+function showCleanup(){$('cleanupReport').classList.remove('hidden');const r=state.cleanup;if(!r)return;$('cleanupTitle').textContent=r.rebuiltExterior?'Exterior rebuilt · review geometry':r.ready?(r.changed?'Auto-cleaned · checks passed':'Auto-checked · no repair needed'):'Auto-cleaned · needs review';$('cleanupReport').classList.toggle('repair-needed',!r.ready);$('cleanupDetails').textContent=[(r.unionedParts?r.unionedParts+' solid parts joined. ':'')+r.inputFaces.toLocaleString()+' → '+r.outputFaces.toLocaleString()+' triangles',r.invalidFaces+' invalid, '+r.degenerateFaces+' collapsed and '+r.duplicateFaces+' duplicate faces removed',(r.strayFacesRemoved||0)+' tiny stray faces removed; '+(r.boundaryVerticesStitched||0)+' boundary vertices stitched', (r.microPatchesRebuilt||0)+' tiny intersecting patches rebuilt',r.weldedSeams+' near-seam corners joined; '+r.reorientedFaces+' faces reoriented',r.filledHoles+' small holes filled ('+r.addedFaces+' faces added)',r.components+' surface components retained',r.boundaryEdges+' open edges; '+r.nonManifoldEdges+' non-manifold edges; '+r.nonManifoldVertices+' non-manifold vertices',r.intersections+(r.intersections>=20?'+':'')+' overlapping face pairs detected',!r.intersectionCheckComplete?'Intersection scan limited; repair the model before running.':'Intersection scan completed.',r.ready?'Surface checks passed. OpenFOAM will check the surface again and the volume mesh when you run.':'Repair remaining openings / overlaps in CAD, or turn on Seal openings below, then reimport.',r.filledHoles?'Review filled openings: even a small hole can be intentional.':'', r.rebuiltExterior?rebuildSummary(r,+$('length').value):'', r.unionNote||'Original file unchanged. Closed overlapping parts are automatically joined when possible.'].filter(Boolean).join('\n');$('cleanupReport').open=!r.ready;if(!r.ready){$('stateBadge').textContent='Model needs repair';$('status').textContent='Cleanup finished with unresolved geometry. Open the cleanup summary below the model.';}}
 // Reduce an imported mesh to the solver's triangle budget before cleanup and IPC.
 // STEP and 3MF arrive already reduced from the worker; this covers STL and OBJ, which
 // are parsed in the renderer. Returns a {from,to} summary, or null when nothing changed.
@@ -124,7 +163,7 @@ function reduceGeometry(geometry){
 function simplifiedNote(reduction){
   return reduction?' Simplified from '+reduction.from.toLocaleString()+' to '+reduction.to.toLocaleString()+' triangles for solving.':'';
 }
-async function prepareImport(geometry){const g=geometry.index?geometry.toNonIndexed():geometry,vertices=g.getAttribute('position')?.array.slice();if(g!==geometry)g.dispose();return api.modelClean({vertices,parts:geometry.userData?.parts});}
+async function prepareImport(geometry){const g=geometry.index?geometry.toNonIndexed():geometry,vertices=g.getAttribute('position')?.array.slice();if(g!==geometry)g.dispose();return api.modelClean({vertices,parts:geometry.userData?.parts,wrap:wrapOptions()});}
 function ensureClean(){if(!state.cleanup?.ready)throw Error('The model still has geometry problems. Open its cleanup summary, repair the remaining issues in CAD, and reimport before running.');}
 function sample(kind){let g;if(kind==='sphere')g=new T.SphereGeometry(.5,48,32);else if(kind==='body'){g=new T.SphereGeometry(.5,48,32);g.scale(1,.6,.6);}else g=new T.BoxGeometry(1,.8,.8);installGeometry(g,{sphere:'Sphere',body:'Streamlined body',cube:'Block'}[kind],null,1);g.dispose();document.querySelectorAll('[data-sample]').forEach(b=>b.classList.toggle('selected',b.dataset.sample===kind));}
 async function parseModel(file){if(file.parts?.length){const gs=await Promise.all(file.parts.map(p=>parseModel({name:p.name+".stl",bytes:p.bytes})));const merged=mergeGeometries(gs);merged.userData={parts:gs.map(g=>g.attributes.position.array.slice())};gs.forEach(g=>g.dispose());return merged;}if(/\.(step|stp|3mf)$/i.test(file.name)){const converted=await api.modelConvert({type:/\.3mf$/i.test(file.name)?'3mf':'step',bytes:file.bytes});const geometries=converted.parts.map(p=>{const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(p,3));g.rotateX(-Math.PI/2);return g;});const merged=mergeGeometries(geometries);merged.userData={meters:true,parts:geometries.map(g=>g.attributes.position.array.slice())};geometries.forEach(g=>g.dispose());return merged;}const bytes=new Uint8Array(file.bytes);if(/\.stl$/i.test(file.name))return new STLLoader().parse(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));if(/\.obj$/i.test(file.name)){const group=new OBJLoader().parse(new TextDecoder().decode(bytes));group.updateMatrixWorld(true);const geoms=[];group.traverse(o=>{if(o.isMesh){const g=(o.geometry.index?o.geometry.toNonIndexed():o.geometry.clone()).applyMatrix4(o.matrixWorld);for(const a of Object.keys(g.attributes))if(a!=='position')g.deleteAttribute(a);geoms.push(g);}});if(!geoms.length)throw Error('The OBJ has no triangle surfaces.');const merged=mergeGeometries(geoms);merged.userData={parts:geoms.map(g=>g.attributes.position.array.slice())};geoms.forEach(g=>g.dispose());return merged;}throw Error('Choose an STL, OBJ, STEP or 3MF file.');}
@@ -212,6 +251,9 @@ $('exportCSV').onclick=handle(()=>save('csv','AeroDesk-results',csvData()));$('e
 document.querySelectorAll('[data-sample]').forEach(b=>b.onclick=()=>sample(b.dataset.sample));
 for(const id of ['fluidMedium','groundMode','groundClearance','length','speed','yaw','pitch','roll','re','quality','steps','density','engine','ransQuality','cpuWorkers','computeBackend','nu','roughness','referenceArea','intensity','turbulenceRatio'])$(id).addEventListener('change',()=>{if(id==='fluidMedium'){const preset=fluidPresets[$('fluidMedium').value];$('density').value=preset.density;$('nu').value=preset.nu;}if(id==='groundMode'&&+$('groundClearance').value>5*+$('length').value)$('groundClearance').value=.1*+$('length').value;if($('fluidMedium').value==='water'||$('groundMode').value!=='none')$('engine').value='openfoam';if(id==='referenceArea')state.referenceAreaKind='entered';if(id==='length'&&state.referenceAreaKind==='model-projection')estimateReferenceArea();updateAreaBasis();syncReynoldsInput();invalidate();if(['yaw','pitch','roll'].includes(id))rebuildModel();updatePlan();});
 $('ransRe').addEventListener('change',()=>{try{$('ransRe').setCustomValidity('');$('speed').value=String(speedForReynolds(+$('ransRe').value,+$('length').value,+$('nu').value));syncReynoldsInput();invalidate();}catch(e){$('ransRe').setCustomValidity(e.message);invalidate();$('status').textContent=e.message;toast(e.message);}});
+for(const id of ['sealOpenings','sealSize','sealMillimeters','rebuildDetail'])$(id).addEventListener('change',updateSealScale);
+$('length').addEventListener('change',updateSealScale);
+updateSealScale();
 for(const axis of ['X','Z'])$('rotate'+axis).onclick=()=>{state.base['rotate'+axis](Math.PI/2);rotateManualCG(axis);if(state.referenceAreaKind==='model-projection')estimateReferenceArea();invalidate();rebuildModel();updatePlan();};
 for(const [id,mode] of [['viewFlow','flow'],['viewSlice','slice'],['viewModel','model']])$(id).onclick=()=>{state.mode=mode;document.querySelectorAll('.segmented button').forEach(b=>b.classList.toggle('active',b.id===id));$('legend').classList.toggle('hidden',!state.result||mode==='model');drawFlow();};
 document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>selectView(b.dataset.view));
@@ -672,7 +714,7 @@ $('fusion').onclick=handle(async()=>{$('fusionDialog').showModal();const s=await
 window.runStabilityStudy=runStability;
 window.qaStabilityStudy=async()=>{const material=readMaterial(),s=state.settings,baseline=state.result;try{applyMaterial({...material,cgMode:'manual',cg:[0,0,0]});state.settings={...s,qualityMode:'draft'};await runStability();if(state.stabilityStudy?.samples.length!==4||state.result!==baseline)throw Error('Stability workflow did not preserve baseline and complete four studies.');return {ok:true,testOnlyCG:[0,0,0],notUserMeasuredCG:true,...state.stabilityStudy};}finally{applyMaterial(material);state.settings=s;state.stabilityStudy=null;updateAnalysis();}};
 
-$('rebuildExterior').onclick=handle(async()=>{if(busy||!state.base)return;setBusy(true);$('stop').disabled=true;$('status').textContent='Rebuilding an approximate exterior; small features may change…';const g=state.base.clone(),name=state.name,source=state.source,L=+$('length').value;try{const result=await api.modelClean({vertices:g.attributes.position.array,rebuild:true});if(!result.report.ready)throw Error('Exterior rebuild still failed geometry checks. The current model was preserved.');for(let i=0;i<result.vertices.length;i++)result.vertices[i]*=L;installGeometry(g,name,source,true,result);$('cleanupReport').open=true;toast('Exterior rebuilt. Approximate cell size '+(result.report.rebuildSpacing*L*1000).toPrecision(3)+' mm. Review thin details and gaps.');}finally{g.dispose();setBusy(false);}});
+$('rebuildExterior').onclick=handle(async()=>{if(busy||!state.base)return;setBusy(true);$('stop').disabled=true;$('status').textContent='Rebuilding an approximate exterior; small features may change…';const g=state.base.clone(),name=state.name,source=state.source,L=+$('length').value;try{const result=await api.modelClean({vertices:g.attributes.position.array,rebuild:true,wrap:wrapOptions()});if(!result.report.ready)throw Error('Exterior rebuild still failed geometry checks. The current model was preserved.');for(let i=0;i<result.vertices.length;i++)result.vertices[i]*=L;installGeometry(g,name,source,true,result);$('cleanupReport').open=true;toast('Exterior rebuilt. '+rebuildSummary(result.report,L)+' Review thin details and gaps.');}finally{g.dispose();setBusy(false);}});
 
 
 

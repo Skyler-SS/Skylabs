@@ -36,3 +36,13 @@ header{height:60px;padding:0 20px}.workspace{height:calc(100vh - 60px);min-heigh
 
 #centerConfidence,#centerLoadBalance{display:block;margin-top:5px;line-height:1.45}#centerConfidence{color:#8c6221}.centers-results details{margin-top:10px}.centers-results details summary{font-size:11px;cursor:pointer}#forceAxisResult{font-size:11px;line-height:1.5}
 #linePositionControl{display:block;line-height:18px}#linePositionControl.hidden{display:none}#linePositionValue{float:right;min-width:94px;text-align:right;font-variant-numeric:tabular-nums}#linePositionControl #linePosition{display:block;width:100%;margin:5px 0;height:18px}
+
+/* Shrink-wrap repair controls, inside the cleanup report. */
+.wrap-controls{border:1px solid #cfe0d8;background:#f7fbf9;border-radius:6px;padding:9px;margin:9px 0}
+.wrap-controls .inline-check{font-size:11px;font-weight:600;margin-bottom:4px}
+.wrap-controls .two-fields{gap:7px;margin:7px 0 0}
+.wrap-controls label{font-size:10px;margin:0}
+.wrap-controls select,.wrap-controls input{font-size:11px}
+.wrap-controls .small{margin:4px 0 0;line-height:1.5}
+#sealCustom{display:block;margin-top:7px}
+#sealScale{color:#4a6b5d;font-variant-numeric:tabular-nums}

@@ -6,7 +6,16 @@ let win;
 const {Worker}=require('node:worker_threads');
 function modelJob(data){return new Promise((resolve,reject)=>{const worker=new Worker(path.join(__dirname,'dist/model-worker.cjs'),{workerData:data});const timer=setTimeout(()=>{worker.terminate();reject(Error('Model processing exceeded two minutes. Simplify the assembly and try again.'));},120000);worker.once('message',m=>{clearTimeout(timer);worker.terminate();m.error?reject(Error(m.error)):resolve(m.result);});worker.once('error',e=>{clearTimeout(timer);reject(e);});worker.once('exit',code=>{clearTimeout(timer);if(code!==0)reject(Error('Model processor stopped.'));});});}
 ipcMain.handle('model-convert',async(_event,d)=>{if(!['step','3mf'].includes(d?.type)||!d.bytes?.length||d.bytes.length>512*1024*1024)throw Error('Choose a STEP or 3MF file under 512 MB.');return modelJob({type:d.type,bytes:d.bytes});});
-ipcMain.handle('model-clean',async(_event,d)=>{if(!d?.vertices?.length||d.vertices.length>1800000||d.vertices.length%9||d.parts?.reduce((s,p)=>s+p.length,0)>1800000)throw Error('Unsupported model size.');return require('./model-service.cjs').cleanModel(d,modelJob);});
+// Only forward a known shape to the worker; exterior-rebuild.mjs validates the ranges.
+function wrapRequest(wrap){
+ if(wrap===undefined||wrap===null)return undefined;
+ if(typeof wrap!=='object'||Array.isArray(wrap))throw Error('Invalid rebuild options.');
+ const out={};
+ if(wrap.mode!==undefined){if(!['auto','parity','wrap'].includes(wrap.mode))throw Error('Invalid rebuild mode.');out.mode=wrap.mode;}
+ for(const key of ['sealFraction','resolution']){const v=wrap[key];if(v===undefined||v===null)continue;if(typeof v!=='number'||!Number.isFinite(v))throw Error('Invalid rebuild '+key+'.');out[key]=v;}
+ return out;
+}
+ipcMain.handle('model-clean',async(_event,d)=>{if(!d?.vertices?.length||d.vertices.length>1800000||d.vertices.length%9||d.parts?.reduce((s,p)=>s+p.length,0)>1800000)throw Error('Unsupported model size.');return require('./model-service.cjs').cleanModel({...d,wrap:wrapRequest(d.wrap)},modelJob);});
 const foam=require('./openfoam.cjs');
 let foamJob=null,lastCase=null;
 const studyStore=()=>require('./study-store.cjs').store(path.join(app.getPath('userData'),'saved-studies'));
