@@ -7,7 +7,14 @@ const keys={access:'test-access',secret:'test-secret'};
 test('document browsing encodes search and returns only safe Part Studio metadata',async()=>{
  const k={...keys,origin:'https://cad.onshape.com'},id='012345678901234567890123',wid='012345678901234567890124';let called;
  const list=await onshape.browse(k,{query:'wing & tail',offset:20},async url=>{called=new URL(url);return new Response(JSON.stringify({items:[{id,name:'Wing',secret:'not exposed'}],next:'untrusted'}));});assert.equal(called.searchParams.get('q'),'wing & tail');assert.equal(called.searchParams.get('offset'),'20');assert.deepEqual(Object.keys(list.items[0]),['id','name']);assert.equal(list.more,true);
- const r=await onshape.browse(k,{kind:'elements',document:id,workspace:wid},async()=>new Response(JSON.stringify([{id,name:'Plane',elementType:'PARTSTUDIO'},{id,name:'Assembly',elementType:'ASSEMBLY'}])));assert.equal(r.items.length,1);assert.equal(onshape.parseLink(r.items[0].link).workspace,true);
+ // Part Studio and Assembly tabs are both offered, each carrying an explicit kind so
+ // the caller never has to infer it from the link. Other tab types stay hidden.
+ const wid2='012345678901234567890125';
+ const r=await onshape.browse(k,{kind:'elements',document:id,workspace:wid},async()=>new Response(JSON.stringify([{id,name:'Plane',elementType:'PARTSTUDIO'},{id:wid2,name:'Airframe',elementType:'ASSEMBLY'},{id:wid,name:'Drawing 1',elementType:'DRAWING'},{id:wid,name:'Sheet',elementType:'BLOB'}])));
+ assert.deepEqual(r.items.map(x=>[x.name,x.kind]),[['Plane','partstudio'],['Airframe','assembly']]);
+ assert.deepEqual(Object.keys(r.items[0]).sort(),['id','kind','link','name']);
+ assert.equal(onshape.parseLink(r.items[0].link).workspace,true);
+ assert.equal(onshape.parseAssemblyLink(r.items[1].link).element,wid2);
  await assert.rejects(()=>onshape.browse(k,{kind:'elements',document:'../bad',workspace:wid}),/valid document/);
 });
 test('Parse document links and preserve configuration with correct encoding',()=>{
@@ -32,4 +39,33 @@ test('STL redirects are re-signed and binary bytes survive',async()=>{
 test('Do not send credentials outside Onshape; handle API errors clearly',async()=>{
   let calls=0;await assert.rejects(()=>onshape.request(onshape.parseLink(link).url,keys,async()=>{calls++;return new Response(null,{status:307,headers:{location:'https://attacker.example/file'}});}),/onshape.com/);assert.equal(calls,1);
   await assert.rejects(()=>onshape.request(onshape.parseLink(link).url,keys,async()=>new Response('',{status:401})),/rejected the API keys/);
+});
+
+test('assembly links and part addresses are built from validated ids only',async()=>{
+ const base='https://cad.onshape.com/documents/'+'a'.repeat(24)+'/w/'+'b'.repeat(24)+'/e/'+'c'.repeat(24);
+ const a=onshape.parseAssemblyLink(base);
+ const u=new URL(a.url);
+ assert.equal(u.pathname,'/api/v16/assemblies/d/'+'a'.repeat(24)+'/w/'+'b'.repeat(24)+'/e/'+'c'.repeat(24));
+ // Mate features and connectors are what make joints drivable; non-solids are noise.
+ assert.equal(u.searchParams.get('includeMateFeatures'),'true');
+ assert.equal(u.searchParams.get('includeMateConnectors'),'true');
+ assert.equal(u.searchParams.get('includeNonSolids'),'false');
+ // A URL configuration is carried through rather than silently dropped.
+ assert.equal(new URL(onshape.parseAssemblyLink(base+'?configuration=size%3Dlarge').url).searchParams.get('configuration'),'size=large');
+ assert.throws(()=>onshape.parseAssemblyLink('https://cad.onshape.com/documents/'+'a'.repeat(24)),/Assembly tab/);
+ assert.throws(()=>onshape.parseAssemblyLink('https://evil.example.com/documents/x'),/onshape\.com/);
+
+ // A part is addressed by the microversion its instance reports, so parts living in
+ // linked documents resolve the same way as parts in this one.
+ const instance={documentId:'a'.repeat(24),documentMicroversion:'d'.repeat(24),elementId:'c'.repeat(24),partId:'JHD'};
+ const stl=new URL(onshape.partStlUrl('https://cad.onshape.com',instance));
+ assert.equal(stl.pathname,'/api/v16/parts/d/'+'a'.repeat(24)+'/m/'+'d'.repeat(24)+'/e/'+'c'.repeat(24)+'/partid/JHD/stl');
+ assert.equal(stl.searchParams.get('units'),'meter');
+ assert.equal(stl.searchParams.get('mode'),'binary');
+ // Missing or malformed ids must fail loudly rather than build a wrong address.
+ assert.throws(()=>onshape.partStlUrl('https://cad.onshape.com',{...instance,documentMicroversion:null}),/microversion/);
+ assert.throws(()=>onshape.partStlUrl('https://cad.onshape.com',{...instance,documentId:'../x'}),/document or tab/);
+ assert.throws(()=>onshape.partStlUrl('https://cad.onshape.com',{...instance,partId:'badid'}),/part id/);
+ // A part id with URL-significant characters is escaped, not interpolated raw.
+ assert.ok(onshape.partStlUrl('https://cad.onshape.com',{...instance,partId:'a/b?c'}).includes('partid/a%2Fb%3Fc'));
 });

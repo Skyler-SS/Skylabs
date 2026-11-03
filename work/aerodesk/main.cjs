@@ -43,7 +43,7 @@ const result=await job.run(vertices,settings,await readCalibration());
   }finally{if(foamJob===job)foamJob=null;}
 });
 ipcMain.handle('foam-cancel',()=>{foamJob?.cancel();return true;});
-ipcMain.handle('foam-case',async(_e,folder)=>{const root=path.resolve(app.getPath('userData'),'cases'),target=path.resolve(folder||lastCase||root);const gpuRoot=path.resolve(app.getPath('home'),'AeroDeskGPU','cases');if(target!==root&&!target.startsWith(root+path.sep)&&target!==gpuRoot&&!target.startsWith(gpuRoot+path.sep))throw Error('Choose an AeroDesk case folder.');return shell.openPath(target);});
+ipcMain.handle('foam-case',async(_e,folder)=>{const root=path.resolve(app.getPath('userData'),'cases'),target=path.resolve(folder||lastCase||root);const gpuRoot=path.resolve(app.getPath('home'),'AeroDeskGPU','cases');if(target!==root&&!target.startsWith(root+path.sep)&&target!==gpuRoot&&!target.startsWith(gpuRoot+path.sep))throw Error('Choose an SkyLabs case folder.');return shell.openPath(target);});
 ipcMain.handle('foam-restore',async(_event,{settings,vertices})=>{const option=process.argv.find(x=>x.startsWith('--restore-case='));if(!option)throw Error('No saved result was selected.');lastCase=path.resolve(option.slice('--restore-case='.length));const result=await foam.restoreCase(lastCase,vertices,settings);result.resultId=await studyStore().put(result,settings,vertices);return result;});
 app.on('before-quit',()=>foamJob?.cancel());
 const onshape=require('./onshape.cjs');
@@ -81,8 +81,41 @@ ipcMain.handle('onshape-import',async(_event,link)=>{
   if(process.argv.includes('--onshape-browse-test')){const dir=path.resolve(process.env.AERODESK_TEST_OUTPUT);await fs.mkdir(dir,{recursive:true});await fs.writeFile(path.join(dir,'onshape-current.stl'),bytes);}
   return {name:'Onshape-'+target.element.slice(0,6)+'.stl',bytes:new Uint8Array(bytes),parts,link:target.link,workspace:target.workspace};
 });
+// An Assembly tab is imported as its individual parts plus the solved occurrence
+// transforms, not as one flattened mesh, so joints can be driven locally afterwards.
+// Nothing here ever writes back to Onshape.
+const ASSEMBLY_MAX_SOURCES=64,ASSEMBLY_MAX_OCCURRENCES=400,ASSEMBLY_MAX_BYTES=512*1024*1024;
+ipcMain.handle('onshape-assembly',async(_event,link)=>{
+  const keys=await readKeys();
+  if(!keys)throw Error('Connect Onshape first.');
+  const {assemblyDefinition,partStlUrl,request}=onshape;
+  const {definition,target}=await assemblyDefinition(keys,link);
+  const {readAssembly,leafParts}=await import('./src/joints.mjs');
+  const assembly=readAssembly(definition);
+  const parts=leafParts(assembly);
+  if(!parts.length)throw Error('This assembly contains no solid parts to import.');
+  if(parts.length>ASSEMBLY_MAX_OCCURRENCES)throw Error('This assembly places '+parts.length+' parts. Import a sub-assembly of up to '+ASSEMBLY_MAX_OCCURRENCES+'.');
+  // Repeated hardware shares one source key, so N identical screws download once.
+  const unique=new Map();
+  for(const part of parts)if(!unique.has(part.source))unique.set(part.source,part.instance);
+  if(unique.size>ASSEMBLY_MAX_SOURCES)throw Error('This assembly uses '+unique.size+' distinct parts (limit '+ASSEMBLY_MAX_SOURCES+'). Import a sub-assembly.');
+  const meshes={};let total=0,done=0;
+  for(const [source,instance] of unique){
+    const bytes=await request(partStlUrl(keys.origin,instance),keys);
+    total+=bytes.length;
+    if(total>ASSEMBLY_MAX_BYTES)throw Error('This assembly exceeds 512 MB of geometry. Import fewer parts.');
+    meshes[source]=new Uint8Array(bytes);
+    done++;
+    if(!_event.sender.isDestroyed())_event.sender.send('assembly-progress',{done,total:unique.size,name:instance.name});
+  }
+  return {definition,meshes,link:target.link,workspace:target.workspace,
+    name:'Onshape assembly '+target.element.slice(0,6),occurrences:parts.length,sources:unique.size};
+});
 ipcMain.handle('onshape-help',async()=>shell.openExternal('https://cad.onshape.com/help/Content/Plans/my_account_developer.htm'));
-app.setName('AeroDesk');
+// The data folder keeps its original name so saved settings, stored Onshape keys and
+// existing case folders survive the rename. Only the displayed name changes.
+app.setPath('userData',path.join(app.getPath('appData'),'AeroDesk'));
+app.setName('SkyLabs');
 app.whenReady().then(async()=>{
   const pipeOption=process.argv.find(a=>a.startsWith('--connect-onshape-pipe='));
   if(pipeOption){
@@ -96,8 +129,8 @@ app.whenReady().then(async()=>{
     }catch(e){console.error(e.message);app.exit(1);}return;
   }
   const importTest=process.argv.find(a=>a.startsWith('--cleanup-file-test='));
-  const captureMode=process.argv.includes('--restore-qa')||process.argv.includes('--onshape-browse-test')||process.argv.includes('--reynolds-smoke-test')||!!importTest||process.argv.includes('--cleanup-smoke-test')||process.argv.includes('--smoke-test')||process.argv.includes('--rans-smoke-test')||process.argv.includes('--connection-proof');
-  win=new BrowserWindow({width:1480,height:940,minWidth:1100,minHeight:740,backgroundColor:'#101822',title:'AeroDesk 0.14.0 — OpenFOAM wind tunnel',show:!captureMode,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,backgroundThrottling:false,offscreen:captureMode,partition:captureMode?'qa-'+Date.now():undefined}});
+  const captureMode=process.argv.includes('--assembly-qa')||process.argv.includes('--restore-qa')||process.argv.includes('--onshape-browse-test')||process.argv.includes('--reynolds-smoke-test')||!!importTest||process.argv.includes('--cleanup-smoke-test')||process.argv.includes('--smoke-test')||process.argv.includes('--rans-smoke-test')||process.argv.includes('--connection-proof');
+  win=new BrowserWindow({width:1480,height:940,minWidth:1100,minHeight:740,backgroundColor:'#101822',icon:path.join(__dirname,'app.ico'),title:'SkyLabs 0.14.0 — OpenFOAM wind tunnel',show:!captureMode,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,backgroundThrottling:false,offscreen:captureMode,partition:captureMode?'qa-'+Date.now():undefined}});
   Menu.setApplicationMenu(null);
   if(captureMode)win.webContents.on('console-message',event=>{if(event.level==='error')console.error('Renderer: '+event.message);});
   win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
@@ -105,6 +138,22 @@ app.whenReady().then(async()=>{
   win.webContents.session.setPermissionRequestHandler((_wc,_p,callback)=>callback(false));
   await win.loadFile('dist/index.html');
   if(process.argv.includes('--astra-onshape-test')){try{const r=await win.webContents.executeJavaScript('window.testOnshapeImport('+JSON.stringify(process.env.AERODESK_TEST_ONSHAPE_URL||'')+')');await fs.mkdir(process.env.AERODESK_TEST_OUTPUT,{recursive:true});await fs.writeFile(path.join(process.env.AERODESK_TEST_OUTPUT,'astraplane-onshape.json'),JSON.stringify(r,null,2));await fs.writeFile(path.join(process.env.AERODESK_TEST_OUTPUT,'astraplane-import.png'),(await win.webContents.capturePage()).toPNG());console.log(JSON.stringify(r));app.exit(0);}catch(e){console.error(e);app.exit(1);}return;}
+  if(process.argv.includes('--assembly-qa')){try{
+    const dir=path.resolve(process.env.AERODESK_TEST_OUTPUT||app.getPath('temp'));await fs.mkdir(dir,{recursive:true});
+    const step=async(call)=>Promise.race([win.webContents.executeJavaScript(call),
+      new Promise((_,reject)=>setTimeout(async()=>{let at='unknown';try{at=await win.webContents.executeJavaScript('window.__qaStep||"start"');}catch{}
+        reject(Error('Assembly QA timed out after the step: '+at));},90000))]);
+    await step('window.qaAssembly()');
+    // Offscreen windows paint on a timer, so settle before every capture or the
+    // screenshot shows a frame from before the change.
+    await new Promise(r=>setTimeout(r,600));
+    await fs.writeFile(path.join(dir,'assembly-dialog.png'),(await win.webContents.capturePage()).toPNG());
+    const r=await step('window.qaAssemblyApply()');
+    await new Promise(r=>setTimeout(r,600));
+    await fs.writeFile(path.join(dir,'assembly-imported.png'),(await win.webContents.capturePage()).toPNG());
+    await fs.writeFile(path.join(dir,'assembly-qa.json'),JSON.stringify(r,null,2));
+    console.log(JSON.stringify(r));app.exit(r&&r.ok?0:1);
+  }catch(e){console.error(e.message);app.exit(1);}return;}
   if(process.argv.includes('--onshape-browse-test')){try{const report=await win.webContents.executeJavaScript('window.testOnshapeBrowse()');const dir=path.resolve(process.env.AERODESK_TEST_OUTPUT||app.getPath('temp'));await fs.mkdir(dir,{recursive:true});await fs.writeFile(path.join(dir,'onshape-browse-test.json'),JSON.stringify(report,null,2));await fs.writeFile(path.join(dir,'onshape-import.png'),(await win.webContents.capturePage()).toPNG());console.log(JSON.stringify(report));app.exit(0);}catch(e){console.error(e.message);app.exit(1);}return;}
 
   if(importTest){try{const filename=importTest.slice('--cleanup-file-test='.length);if(!/\.(stl|obj|step|stp|3mf)$/i.test(filename)||(await fs.stat(filename)).size>512*1024*1024)throw Error('Invalid model test file.');
@@ -113,8 +162,8 @@ app.whenReady().then(async()=>{
   }catch(e){console.error(e);app.exit(1);}return;}
   if(process.argv.includes('--reynolds-smoke-test')){try{const report=await win.webContents.executeJavaScript('window.runReynoldsChecks()');const folder=path.resolve(process.env.AERODESK_TEST_OUTPUT||app.getPath('temp'));await fs.mkdir(folder,{recursive:true});await fs.writeFile(path.join(folder,'reynolds-ui-report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));app.exit(0);}catch(e){console.error(e);app.exit(1);}return;}
   const startup=process.argv.find(a=>a.startsWith('--open-project='));
-  if(startup){try{const filename=startup.slice('--open-project='.length);if(!filename.toLowerCase().endsWith('.aero')||(await fs.stat(filename)).size>256*1024*1024)throw Error('Choose an AeroDesk project smaller than 256 MB.');const project=JSON.stringify(await readProject(filename));await win.webContents.executeJavaScript('window.openStartupProject('+JSON.stringify(project)+')');
-    if(process.argv.includes('--run-startup-project')||process.argv.some(x=>x.startsWith('--restore-case='))){const report=await win.webContents.executeJavaScript('window.runStartupProject('+process.argv.includes('--viewer-qa')+','+process.argv.some(x=>x.startsWith('--restore-case='))+')');const target=path.resolve(process.env.AERODESK_TEST_OUTPUT||app.getPath('userData'));await fs.mkdir(target,{recursive:true});await fs.writeFile(path.join(target,'user-plane-app-report.json'),JSON.stringify(report,null,2));await fs.writeFile(path.join(target,'user-plane-app.png'),(await win.webContents.capturePage()).toPNG());if(process.argv.includes('--viewer-qa')){for(const mode of ['pressure','friction','section','vortex','cloud']){await win.webContents.executeJavaScript('window.qaAnalysisView('+JSON.stringify(mode)+')');await fs.writeFile(path.join(target,mode+'.png'),(await win.webContents.capturePage()).toPNG());}await win.webContents.executeJavaScript('window.qaAnalysisView("pressure")');const html=await win.webContents.executeJavaScript('window.qaAnalysisReport()');await fs.writeFile(path.join(target,'AeroDesk-analysis.html'),html);await fs.writeFile(path.join(target,'AeroDesk-analysis.pdf'),await renderReportPDF(html));}console.log(JSON.stringify({ok:report.ok,cells:report.cells,analysis:report.analysis?.checks}));}
+  if(startup){try{const filename=startup.slice('--open-project='.length);if(!filename.toLowerCase().endsWith('.aero')||(await fs.stat(filename)).size>256*1024*1024)throw Error('Choose an SkyLabs project smaller than 256 MB.');const project=JSON.stringify(await readProject(filename));await win.webContents.executeJavaScript('window.openStartupProject('+JSON.stringify(project)+')');
+    if(process.argv.includes('--run-startup-project')||process.argv.some(x=>x.startsWith('--restore-case='))){const report=await win.webContents.executeJavaScript('window.runStartupProject('+process.argv.includes('--viewer-qa')+','+process.argv.some(x=>x.startsWith('--restore-case='))+')');const target=path.resolve(process.env.AERODESK_TEST_OUTPUT||app.getPath('userData'));await fs.mkdir(target,{recursive:true});await fs.writeFile(path.join(target,'user-plane-app-report.json'),JSON.stringify(report,null,2));await fs.writeFile(path.join(target,'user-plane-app.png'),(await win.webContents.capturePage()).toPNG());if(process.argv.includes('--viewer-qa')){for(const mode of ['pressure','friction','section','vortex','cloud']){await win.webContents.executeJavaScript('window.qaAnalysisView('+JSON.stringify(mode)+')');await fs.writeFile(path.join(target,mode+'.png'),(await win.webContents.capturePage()).toPNG());}await win.webContents.executeJavaScript('window.qaAnalysisView("pressure")');const html=await win.webContents.executeJavaScript('window.qaAnalysisReport()');await fs.writeFile(path.join(target,'SkyLabs-analysis.html'),html);await fs.writeFile(path.join(target,'SkyLabs-analysis.pdf'),await renderReportPDF(html));}console.log(JSON.stringify({ok:report.ok,cells:report.cells,analysis:report.analysis?.checks}));}
   }catch(e){console.error(e);if(process.env.AERODESK_TEST_OUTPUT){await fs.mkdir(process.env.AERODESK_TEST_OUTPUT,{recursive:true});await fs.writeFile(path.join(process.env.AERODESK_TEST_OUTPUT,'failure.txt'),e.stack||e.message);}if(captureMode){app.exit(1);return;}await dialog.showMessageBox(win,{type:'error',message:'Could not finish this project',detail:e.message});}}
 
   if(process.argv.includes('--slice-color-qa')){const target=path.resolve(process.env.AERODESK_TEST_OUTPUT||app.getPath('userData')),checks=[];for(const mode of ['auto','fixed']){checks.push(await win.webContents.executeJavaScript('window.qaVelocitySliceScale('+JSON.stringify(mode)+')'));await fs.writeFile(path.join(target,'slice-'+mode+'.png'),(await win.webContents.capturePage()).toPNG());}if(checks[1].scale.min!==0||checks[1].scale.max!==checks[1].inlet*1.6||checks[0].scale.actualMax!==checks[1].scale.actualMax)throw Error('Slice reference scale regression');await fs.writeFile(path.join(target,'slice-scale-check.json'),JSON.stringify(checks,null,2));}
@@ -154,7 +203,7 @@ app.whenReady().then(async()=>{
 app.on('window-all-closed',()=>app.quit());
 ipcMain.handle('open-file',async(_event,kind)=>{
   if(!['model','project'].includes(kind))throw Error('Unknown file type');
-  const result=await dialog.showOpenDialog(win,{properties:['openFile'],filters:kind==='model'?[{name:'CAD and mesh models',extensions:['stl','obj','step','stp','3mf']}]:[{name:'AeroDesk project',extensions:['aero']} ]});
+  const result=await dialog.showOpenDialog(win,{properties:['openFile'],filters:kind==='model'?[{name:'CAD and mesh models',extensions:['stl','obj','step','stp','3mf']}]:[{name:'SkyLabs project',extensions:['aero']} ]});
   if(result.canceled)return null;
   const file=result.filePaths[0],stat=await fs.stat(file);
   if(stat.size>512*1024*1024)throw Error('Please choose a file smaller than 512 MB.');
@@ -162,10 +211,10 @@ ipcMain.handle('open-file',async(_event,kind)=>{
   return {name:path.basename(file),bytes:new Uint8Array(bytes)};
 });
 ipcMain.handle('save-file',async(_event,{kind,name,data})=>{
-  const types={pdf:['pdf','PDF analysis report'],html:['html','Printable analysis report'],stl:['stl','Cleaned STL (meters)'],project:['aero','AeroDesk project'],csv:['csv','CSV results'],vtk:['vtk','VTK flow field'],image:['png','PNG image']};
+  const types={pdf:['pdf','PDF analysis report'],html:['html','Printable analysis report'],stl:['stl','Cleaned STL (meters)'],project:['aero','SkyLabs project'],csv:['csv','CSV results'],vtk:['vtk','VTK flow field'],image:['png','PNG image']};
   if(!types[kind]||typeof data!=='string'||data.length>100*1024*1024)throw Error('Invalid export');
   const [ext,label]=types[kind];
-  const result=await dialog.showSaveDialog(win,{defaultPath:path.basename(name||'AeroDesk')+'.'+ext,filters:[{name:label,extensions:[ext]}]});
+  const result=await dialog.showSaveDialog(win,{defaultPath:path.basename(name||'SkyLabs')+'.'+ext,filters:[{name:label,extensions:[ext]}]});
   if(result.canceled)return false;
   if(kind==='project'){await writeProject(result.filePath,data);return true;}
   if(kind==='pdf'){const pdf=await renderReportPDF(data);await fs.writeFile(result.filePath,pdf);return true;}

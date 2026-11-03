@@ -10,7 +10,7 @@ export function validateModelFile(file){
 }
 export function chooseDroppedFile(files,busy=false,dialogOpen=false){
   if(busy)throw Error('Wait for the current import to finish, or stop the simulation, before dropping a new model.');
-  if(dialogOpen)throw Error('Close the open dialog, then drop your model into AeroDesk.');
+  if(dialogOpen)throw Error('Close the open dialog, then drop your model into SkyLabs.');
   if(files.length!==1)throw Error('Drop one STL, OBJ, STEP, or 3MF assembly file at a time.');
   return validateModelFile(files[0]);
 }

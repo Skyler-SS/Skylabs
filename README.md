@@ -1,4 +1,4 @@
-# AeroDesk
+# SkyLabs
 
 A Windows desktop application for importing CAD, preparing external-flow studies,
 running OpenFOAM RANS, and viewing results locally. Version 0.14.0 supports air,
@@ -63,8 +63,8 @@ draft releases. [Contributing](CONTRIBUTING.md) describes the source layout.
 
 ## License
 
-AeroDesk code is MIT-licensed; see [LICENSE](LICENSE). Dependencies retain their
+SkyLabs code is MIT-licensed; see [LICENSE](LICENSE). Dependencies retain their
 own licenses, including LGPL CAD libraries. See
 [third-party notices](work/aerodesk/THIRD-PARTY-NOTICES.txt) and
 [corresponding-source instructions](docs/THIRD_PARTY_SOURCE.md).
-AeroDesk is an independent project, not affiliated with AirShaper, Onshape or Autodesk.
+SkyLabs is an independent project, not affiliated with AirShaper, Onshape or Autodesk.

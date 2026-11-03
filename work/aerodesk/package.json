@@ -2,7 +2,7 @@
   "name": "aerodesk",
   "version": "0.14.0",
   "description": "Windows desktop CFD viewer and OpenFOAM RANS case runner for air and submerged water",
-  "author": "AeroDesk contributors",
+  "author": "SkyLabs contributors",
   "license": "MIT",
   "main": "main.cjs",
   "scripts": {

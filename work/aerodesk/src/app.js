@@ -8,6 +8,7 @@ import {modelRotation,sweepSample,stabilityFindings,spatialFindings} from './pla
 import {isoSurfaceMesh,refinedIsoSurface,sliceSurface,connectedLoads} from './volume-view.mjs';
 import {projectedArea} from './reference-area.mjs';
 import {assessmentOptions,planeShape,assessPlane,assessmentHTML} from './plane-assessment.mjs';
+import {readAssembly,leafParts,poseMatrices,applyMatrix,clampValue,normalizeConfiguration,describeJoint,IDENTITY,DRIVABLE,DOF_UNITS} from './joints.mjs';
 import * as T from 'three';
 import {fields,ramps,fieldScale,velocityContrast,colorValue,loadBins,shiftedMoment,forceStability,surfaceSampler} from './analysis.mjs';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
@@ -40,10 +41,20 @@ $('onshapeDocument').onchange=async()=>{
 };
 $('onshapeWorkspace').onchange=async()=>{
  const token=++browseGeneration,document=$('onshapeDocument').value,workspace=$('onshapeWorkspace').value;fillOptions('onshapeStudio',[],'Loading…');$('onshapeUrl').value='';if(!workspace)return;
- try{const r=await api.onshapeBrowse({kind:'elements',document,workspace});if(token!==browseGeneration)return;browseStudios=r.items;fillOptions('onshapeStudio',r.items,'Choose a Part Studio');$('onshapeBrowseStatus').textContent=r.items.length?'Select a Part Studio, then Import model.':'No Part Studios here. Assemblies are not supported yet.';if(r.items.length===1){$('onshapeStudio').value=r.items[0].id;await $('onshapeStudio').onchange();}}catch(e){if(token===browseGeneration)$('onshapeBrowseStatus').textContent=errorText(e);}
+ try{const r=await api.onshapeBrowse({kind:'elements',document,workspace});if(token!==browseGeneration)return;browseStudios=r.items;fillOptions('onshapeStudio',r.items,'Choose a tab');$('onshapeBrowseStatus').textContent=r.items.length?'Select a Part Studio or Assembly, then continue.':'No Part Studio or Assembly tabs in this workspace.';if(r.items.length===1){$('onshapeStudio').value=r.items[0].id;await $('onshapeStudio').onchange();}}catch(e){if(token===browseGeneration)$('onshapeBrowseStatus').textContent=errorText(e);}
 };
+function selectedElementKind(){const e=browseStudios.find(x=>x.id===$('onshapeStudio').value);return e&&e.kind||'partstudio';}
+// An Assembly tab routes to the joints dialog; a Part Studio keeps the direct import.
+function updateElementMode(){
+ const assembly=selectedElementKind()==='assembly';
+ $('openAssembly').classList.toggle('hidden',!assembly);
+ $('importOnshape').classList.toggle('hidden',assembly);
+ $('onshapePart').parentElement.classList.toggle('hidden',assembly);
+}
 $('onshapeStudio').onchange=async()=>{
- const token=++browseGeneration,studio=browseStudios.find(x=>x.id===$('onshapeStudio').value);$('onshapeUrl').value=studio?.link||'';fillOptions('onshapePart',[],'Loading parts…');if(!studio)return;
+ const token=++browseGeneration,studio=browseStudios.find(x=>x.id===$('onshapeStudio').value);$('onshapeUrl').value=studio?.link||'';fillOptions('onshapePart',[],'Loading parts…');updateElementMode();if(!studio)return;
+ // An assembly has no per-solid picker: its parts are chosen in the joints dialog.
+ if(studio.kind==='assembly'){fillOptions('onshapePart',[],'Chosen in the joints dialog');$('onshapePart').disabled=true;$('onshapeBrowseStatus').textContent='Assembly tab. Open joints to drive its mates and choose which parts to include.';return;}
  try{const r=await api.onshapeBrowse({kind:'parts',document:$('onshapeDocument').value,workspace:$('onshapeWorkspace').value,element:studio.id});if(token!==browseGeneration)return;fillOptions('onshapePart',r.items,'Entire Part Studio');$('onshapePart').disabled=false;$('onshapeBrowseStatus').textContent=r.items.length+' solids. Choose the exterior body for airflow; importing overlapping construction parts can require CAD repair.';if(r.items.length===1){$('onshapePart').value=r.items[0].id;$('onshapePart').onchange();}}catch(e){if(token===browseGeneration){fillOptions('onshapePart',[],'Entire Part Studio');$('onshapeBrowseStatus').textContent=errorText(e)+' You can still try the whole Part Studio.';}}
 };
 $('onshapePart').onchange=()=>{const studio=browseStudios.find(x=>x.id===$('onshapeStudio').value);if(!studio)return;const u=new URL(studio.link);if($('onshapePart').value)u.searchParams.set('aerodeskPart',$('onshapePart').value);$('onshapeUrl').value=u.href;};
@@ -234,11 +245,323 @@ function drawStreamlines(referenceSpeed=state.result?.engine==='openfoam'?state.
   const geometry=new T.BufferGeometry();geometry.setAttribute('position',new T.Float32BufferAttribute(positions,3));geometry.setAttribute('color',new T.Float32BufferAttribute(colors,3));flowGroup.add(new T.LineSegments(geometry,new T.LineBasicMaterial({vertexColors:true,transparent:true,opacity:.55,toneMapped:false})));state.streamlineDrawVersion=(state.streamlineDrawVersion||0)+1;state.streamlineDrawMs=performance.now()-drawStarted;
 }
 function drawChart(){const canvas=$('chart'),r=canvas.getBoundingClientRect();if(!r.width)return;canvas.width=r.width*2;canvas.height=r.height*2;const ctx=canvas.getContext('2d');ctx.scale(2,2);const w=r.width,h=r.height;ctx.strokeStyle='#edf0f3';ctx.lineWidth=1;for(let i=1;i<4;i++){ctx.beginPath();ctx.moveTo(29,h*i/4);ctx.lineTo(w,h*i/4);ctx.stroke();}const hist=state.history;if(hist.length<2){ctx.fillStyle='#aab5be';ctx.font='10px Segoe UI';ctx.fillText('Your results will appear here',35,h*.55);return;}const vals=hist.map(a=>a[$('chartQuantity').value]),pad=Math.max(Math.max(...vals)-Math.min(...vals),Math.abs(vals[0]),1e-9)*.05,max=Math.max(0,...vals)+pad,min=Math.min(0,...vals)-pad;ctx.fillStyle='#99a6b0';ctx.font='8px Segoe UI';ctx.fillText(number(max),0,12);ctx.fillText(number(min),0,h-6);ctx.strokeStyle='#dc9863';ctx.lineWidth=1.8;ctx.beginPath();hist.forEach((a,i)=>{const x=30+(w-33)*i/(hist.length-1),y=5+(h-15)*(1-(a[$('chartQuantity').value]-min)/(max-min||1));i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();}
-function projectData(){if(!state.base)throw Error('Import a model before saving a project.');return {format:'AeroDesk',version:1,studies:state.studies||[],selectedStudy:state.selectedStudy,studySetup:{pitch:$('studyPitch').value,yaw:$('studyYaw').value,grid:$('studyGrid').checked,qualityMode:$('studyQuality').value},name:state.name,source:state.source,repair:state.cleanup?.rebuiltExterior?{rebuiltExterior:true,resolution:384}:null,material:readMaterial(),assessment:readAssessmentOptions(),settings:settings(),vertices:Array.from(state.base.attributes.position.array)};}
-function loadProject(p){if(p?.format!=='AeroDesk'||p.version!==1||!Array.isArray(p.vertices)||p.vertices.length<36||p.vertices.length%9||p.vertices.length>1800000||!p.vertices.every(v=>typeof v==='number'&&Number.isFinite(v)&&Math.abs(v)<100))throw Error('This is not a valid AeroDesk project.');validateSettings(p.settings);const assessment=assessmentOptions(p.assessment),studies=validateStudies(p.studies||[]);for(const row of studies)validateSettings(row.settings);let source=null;if(p.source){const u=new URL(p.source);if(u.protocol!=='https:'||!/^([a-z0-9-]+\.)+onshape\.com$/i.test(u.hostname))throw Error('Invalid Onshape link in project.');source=u.href;}const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(p.vertices,3));installGeometry(g,p.name||'Model',source);g.dispose();applySettings(p.settings);if(p.repair?.rebuiltExterior===true){state.cleanup.rebuiltExterior=true;state.cleanup.unionNote="Approximate exterior rebuild. Small details and gaps may differ from the original CAD. Rebuild resolution: 384 cells across the model.";showCleanup();}applyMaterial(p.material);applyAssessmentOptions(assessment);state.studies=studies;state.selectedStudy=p.selectedStudy||null;if(p.studySetup){$('studyPitch').value=String(p.studySetup.pitch||'0');$('studyYaw').value=String(p.studySetup.yaw||'0');$('studyGrid').checked=!!p.studySetup.grid;$('studyQuality').value=qualityMode(p.studySetup);}rebuildModel();updateFacts();updateAnalysis();renderStudies();}
+// A stored joint configuration is descriptive: the project already holds the posed
+// vertices. It is read back bounded so an edited file cannot inject arbitrary data.
+function readJointConfiguration(value){
+ if(!value||typeof value!=='object'||Array.isArray(value))return null;
+ const out={},ids=Object.keys(value).slice(0,200);
+ for(const id of ids){
+  if(typeof id!=='string'||id.length>80)continue;
+  const v=value[id];if(!v||typeof v!=='object')continue;
+  const entry={};
+  for(const dof of ['angle','offset']){
+   const n=Number(v[dof]);
+   if(Number.isFinite(n)&&Math.abs(n)<1e6)entry[dof]=n;
+  }
+  if(v.flip===true)entry.flip=true;
+  if(Object.keys(entry).length)out[id]=entry;
+ }
+ return Object.keys(out).length?out:null;
+}
+function projectData(){if(!state.base)throw Error('Import a model before saving a project.');return {format:'AeroDesk',version:1,studies:state.studies||[],selectedStudy:state.selectedStudy,studySetup:{pitch:$('studyPitch').value,yaw:$('studyYaw').value,grid:$('studyGrid').checked,qualityMode:$('studyQuality').value},name:state.name,source:state.source,repair:state.cleanup?.rebuiltExterior?{rebuiltExterior:true,resolution:384}:null,material:readMaterial(),assessment:readAssessmentOptions(),settings:settings(),jointConfiguration:state.jointConfiguration||null,vertices:Array.from(state.base.attributes.position.array)};}
+// Projects are still written with the original 'AeroDesk' tag so files saved by this
+// build open in an older one. Both tags are accepted on read.
+
+// --- Assembly joints -------------------------------------------------------------
+// An Onshape Assembly tab is imported as its individual parts plus the solved
+// occurrence transforms. Driving a joint re-poses the affected subtree locally and
+// nothing is ever written back to Onshape. The geometry maths lives in joints.mjs.
+let assemblyState=null,assemblyPreview=null,previewPending=0;
+
+function assemblyPoses(){
+  return poseMatrices(assemblyState.assembly,assemblyState.values);
+}
+
+// Posed vertices per included part, in assembly space (metres, Onshape Z up).
+function assemblyChunks(){
+  const poses=assemblyPoses(),out=[];
+  for(const part of assemblyState.parts){
+    if(!part.include)continue;
+    const source=assemblyState.meshes.get(part.source);
+    if(!source||!source.length)continue;
+    out.push(applyMatrix(new Float32Array(source),poses.get(part.key)||IDENTITY));
+  }
+  return out;
+}
+
+function mergeChunks(chunks){
+  let total=0;for(const c of chunks)total+=c.length;
+  const merged=new Float32Array(total);let o=0;
+  for(const c of chunks){merged.set(c,o);o+=c.length;}
+  return merged;
+}
+
+// Onshape is Z up; the rest of the app works Y up, matching the Part Studio path.
+function zUpToYUp(v){
+  for(let i=0;i<v.length;i+=3){const y=v[i+1],z=v[i+2];v[i+1]=z;v[i+2]=-y;}
+  return v;
+}
+
+function previewScene(){
+  if(assemblyPreview!==null)return assemblyPreview;
+  const canvas=$('assemblyCanvas');
+  let renderer;
+  try{renderer=new T.WebGLRenderer({canvas,antialias:true,alpha:false});}
+  catch(e){assemblyPreview=false;return false;}
+  const scene=new T.Scene();scene.background=new T.Color('#0f1c27');
+  const camera=new T.PerspectiveCamera(40,1,.001,1000);
+  scene.add(new T.HemisphereLight(0xdfefff,0x2a3a48,2.4));
+  const key=new T.DirectionalLight(0xffffff,1.3);key.position.set(1,1.6,1.2);scene.add(key);
+  const mesh=new T.Mesh(new T.BufferGeometry(),
+    new T.MeshStandardMaterial({color:0xa8c8dc,metalness:.08,roughness:.62,side:T.DoubleSide,flatShading:true}));
+  scene.add(mesh);
+  assemblyPreview={renderer,scene,camera,mesh,theta:.9,phi:1.15,radius:3,center:new T.Vector3()};
+  let dragging=false,lastX=0,lastY=0;
+  canvas.addEventListener('pointerdown',e=>{dragging=true;lastX=e.clientX;lastY=e.clientY;canvas.setPointerCapture(e.pointerId);});
+  canvas.addEventListener('pointerup',e=>{dragging=false;canvas.releasePointerCapture(e.pointerId);});
+  canvas.addEventListener('pointermove',e=>{
+    if(!dragging)return;
+    assemblyPreview.theta-=(e.clientX-lastX)*.01;
+    assemblyPreview.phi=Math.min(Math.PI-.05,Math.max(.05,assemblyPreview.phi-(e.clientY-lastY)*.01));
+    lastX=e.clientX;lastY=e.clientY;drawPreview();
+  });
+  canvas.addEventListener('wheel',e=>{
+    e.preventDefault();
+    assemblyPreview.radius=Math.min(40,Math.max(.4,assemblyPreview.radius*(e.deltaY>0?1.12:.89)));
+    drawPreview();
+  },{passive:false});
+  return assemblyPreview;
+}
+
+function drawPreview(){
+  const p=assemblyPreview;if(!p||!p.fit)return;
+  const canvas=$('assemblyCanvas'),w=canvas.clientWidth||420,h=canvas.clientHeight||300;
+  p.renderer.setPixelRatio(Math.min(2,window.devicePixelRatio||1));
+  p.renderer.setSize(w,h,false);
+  p.camera.aspect=w/h;p.camera.updateProjectionMatrix();
+  const r=p.radius*p.fit;
+  p.camera.position.set(
+    p.center.x+r*Math.sin(p.phi)*Math.cos(p.theta),
+    p.center.y+r*Math.cos(p.phi),
+    p.center.z+r*Math.sin(p.phi)*Math.sin(p.theta));
+  p.camera.lookAt(p.center);
+  p.renderer.render(p.scene,p.camera);
+}
+
+// Re-posing a few hundred thousand triangles is quick, but dragging a slider fires
+// far faster than a frame, so coalesce to one rebuild per animation frame.
+function schedulePreview(){
+  if(previewPending)return;
+  previewPending=setTimeout(()=>{previewPending=0;updatePreview();},16);
+}
+
+function updatePreview(){
+  if(!assemblyState)return;
+  const chunks=assemblyChunks(),p=previewScene();
+  const merged=zUpToYUp(mergeChunks(chunks));
+  if(p){
+    const g=new T.BufferGeometry();
+    g.setAttribute('position',new T.Float32BufferAttribute(merged,3));
+    g.computeVertexNormals();g.computeBoundingSphere();
+    p.mesh.geometry.dispose();p.mesh.geometry=g;
+    const sphere=g.boundingSphere;
+    if(sphere&&sphere.radius>0){p.center.copy(sphere.center);p.fit=sphere.radius;}
+    else{p.center.set(0,0,0);p.fit=1;}
+  }
+  const triangles=merged.length/9,included=chunks.length;
+  $('assemblyStats').textContent=included+' of '+assemblyState.parts.length+' parts · '
+    +triangles.toLocaleString()+' triangles'
+    +(triangles>DECIMATE_TARGET_TRIANGLES?' · will be simplified on import':'');
+  $('applyAssembly').disabled=!included;
+  drawPreview();
+}
+
+function jointValue(id){
+  return assemblyState.values[id]||(assemblyState.values[id]={});
+}
+
+function limitText(joint,dof){
+  const lo=joint.limits[dof==='angle'?'angleMin':'offsetMin'];
+  const hi=joint.limits[dof==='angle'?'angleMax':'offsetMax'];
+  if(!Number.isFinite(lo)&&!Number.isFinite(hi))return '';
+  const u=DOF_UNITS[dof];
+  return ' · limit '+(Number.isFinite(lo)?lo:'−∞')+' to '+(Number.isFinite(hi)?hi:'∞')+' '+u;
+}
+
+function renderJoints(){
+  const list=$('jointList'),joints=assemblyState.assembly.joints;
+  list.textContent='';
+  const drivable=joints.filter(j=>j.drivable&&j.resolved);
+  if(!drivable.length){
+    const p=document.createElement('p');p.className='small';
+    p.textContent=joints.length
+      ?'This assembly has '+joints.length+' mate(s), but none are revolute, slider or cylindrical, so there is nothing to drive. Import it as-is.'
+      :'Onshape reported no mates for this assembly. Import it as-is.';
+    list.append(p);
+  }
+  for(const joint of drivable){
+    const row=document.createElement('div');row.className='joint-row';
+    const head=document.createElement('div');head.className='joint-head';
+    const name=document.createElement('b');name.textContent=joint.name;
+    const kind=document.createElement('span');kind.textContent=describeJoint(joint);
+    head.append(name,kind);row.append(head);
+
+    for(const dof of DRIVABLE[joint.type]){
+      const wrap=document.createElement('div');wrap.className='joint-dof';
+      const label=document.createElement('label');
+      label.textContent=(dof==='angle'?'Angle':'Offset')+' ('+DOF_UNITS[dof]+')'+limitText(joint,dof);
+      const lo=joint.limits[dof==='angle'?'angleMin':'offsetMin'];
+      const hi=joint.limits[dof==='angle'?'angleMax':'offsetMax'];
+      const min=Number.isFinite(lo)?lo:(dof==='angle'?-180:-500);
+      const max=Number.isFinite(hi)?hi:(dof==='angle'?180:500);
+      const slider=document.createElement('input');
+      slider.type='range';slider.min=String(min);slider.max=String(max);
+      slider.step=dof==='angle'?'0.5':'0.5';slider.value=String(jointValue(joint.id)[dof]||0);
+      const box=document.createElement('input');
+      box.type='number';box.step=dof==='angle'?'0.5':'0.5';box.className='joint-number';
+      box.value=slider.value;
+      const commit=(value,from)=>{
+        const v=clampValue(joint,dof,Number(value));
+        jointValue(joint.id)[dof]=v;
+        if(from!==slider)slider.value=String(v);
+        if(from!==box)box.value=String(v);
+        schedulePreview();
+      };
+      slider.oninput=()=>commit(slider.value,slider);
+      box.onchange=()=>commit(box.value,box);
+      const controls=document.createElement('div');controls.className='joint-controls';
+      controls.append(slider,box);
+      wrap.append(label,controls);row.append(wrap);
+    }
+
+    const actions=document.createElement('div');actions.className='joint-actions';
+    const flip=document.createElement('button');
+    flip.className='quiet';
+    const flipLabel=()=>{flip.textContent=jointValue(joint.id).flip?'Moving: second part':'Moving: first part';};
+    flipLabel();
+    flip.title='Choose which side of the mate moves; the other side stays put.';
+    flip.onclick=()=>{const v=jointValue(joint.id);v.flip=!v.flip;flipLabel();schedulePreview();};
+    const reset=document.createElement('button');
+    reset.className='quiet';reset.textContent='Reset';
+    reset.onclick=()=>{assemblyState.values[joint.id]={};renderJoints();schedulePreview();};
+    actions.append(flip,reset);row.append(actions);
+    list.append(row);
+  }
+
+  const other=joints.filter(j=>!j.drivable||!j.resolved);
+  if(other.length){
+    const d=document.createElement('p');d.className='small';
+    d.textContent=other.length+' further mate(s) are listed by Onshape as structure only: '
+      +other.slice(0,6).map(j=>j.name).join(', ')+(other.length>6?'…':'')+'.';
+    list.append(d);
+  }
+}
+
+function renderParts(){
+  const list=$('partList');list.textContent='';
+  $('partCount').textContent='('+assemblyState.parts.filter(p=>p.include).length
+    +' of '+assemblyState.parts.length+')';
+  for(const part of assemblyState.parts){
+    const row=document.createElement('label');row.className='part-row';
+    const box=document.createElement('input');box.type='checkbox';box.checked=part.include;
+    box.onchange=()=>{part.include=box.checked;renderParts();schedulePreview();};
+    const name=document.createElement('span');
+    name.textContent=part.name+(part.path.length>1?' · '+part.path.slice(0,-1).length+' level(s) deep':'');
+    row.append(box,name);list.append(row);
+  }
+}
+
+function renderConfigs(){
+  const list=$('configList');list.textContent='';
+  if(!assemblyState.configs.length){
+    const p=document.createElement('p');p.className='small';
+    p.textContent='Save the current joint values under a name to compare configurations later.';
+    list.append(p);return;
+  }
+  for(const config of assemblyState.configs){
+    const row=document.createElement('div');row.className='config-row';
+    const name=document.createElement('span');name.textContent=config.name;
+    const use=document.createElement('button');use.className='quiet';use.textContent='Restore';
+    use.onclick=()=>{
+      assemblyState.values=JSON.parse(JSON.stringify(config.values));
+      renderJoints();schedulePreview();
+    };
+    const drop=document.createElement('button');drop.className='quiet';drop.textContent='Delete';
+    drop.onclick=()=>{
+      assemblyState.configs=assemblyState.configs.filter(c=>c!==config);renderConfigs();
+    };
+    row.append(name,use,drop);list.append(row);
+  }
+}
+
+function renderAssembly(){
+  $('assemblyTitle').textContent=assemblyState.name;
+  renderJoints();renderParts();renderConfigs();updatePreview();
+}
+
+// Kept separate from the fetch so the QA harness can drive the whole dialog,
+// STL parsing included, without a live Onshape document.
+function installAssembly(data,name){
+  const assembly=readAssembly(data.definition);
+  const meshes=new Map();
+  for(const [source,bytes] of Object.entries(data.meshes)){
+    const u=new Uint8Array(bytes);
+    const g=new STLLoader().parse(u.buffer.slice(u.byteOffset,u.byteOffset+u.byteLength));
+    meshes.set(source,g.getAttribute('position').array.slice());
+    g.dispose();
+  }
+  const parts=leafParts(assembly).map(p=>({...p,include:!p.hidden}));
+  assemblyState={link:data.link,workspace:data.workspace,assembly,parts,meshes,
+    values:{},configs:[],name:name||data.name};
+  $('assemblyError').textContent='';
+  renderAssembly();
+}
+
+async function openAssemblyDialog(link){
+  setBusy(true);$('stop').disabled=true;
+  $('status').textContent='Downloading the assembly from Onshape…';
+  try{
+    const data=await api.onshapeAssembly(link);
+    const studio=browseStudios.find(x=>x.link===link.split('?')[0]);
+    installAssembly(data,studio?studio.name:null);
+    $('onshapeDialog').close();
+    $('assemblyDialog').showModal();
+    setTimeout(drawPreview,0);
+    $('status').textContent='Assembly loaded. Drive its joints, then apply.';
+  }finally{setBusy(false);}
+}
+
+async function applyAssemblyConfiguration(){
+  const chunks=assemblyChunks();
+  if(!chunks.length)throw Error('Include at least one part before applying.');
+  const merged=zUpToYUp(mergeChunks(chunks));
+  const g=new T.BufferGeometry();
+  g.setAttribute('position',new T.Float32BufferAttribute(merged,3));
+  g.userData={parts:chunks.map(c=>zUpToYUp(c.slice()))};
+  let reduction=null;
+  try{
+    if(triangleCount(merged)>DECIMATE_TARGET_TRIANGLES){
+      $('status').textContent='Simplifying a large assembly…';
+      reduction=reduceGeometry(g);
+    }
+    $('status').textContent='Cleaning assembly geometry…';
+    const driven=Object.entries(assemblyState.values)
+      .filter(([,v])=>(v.angle||0)||(v.offset||0)).length;
+    const label=assemblyState.name+(driven?' · '+driven+' joint(s) driven':'');
+    const cleaned=await prepareImport(g);
+    installGeometry(g,label,assemblyState.link,true,cleaned);
+    state.jointConfiguration=normalizeConfiguration(assemblyState.assembly,assemblyState.values);
+  }finally{g.dispose();}
+  $('assemblyDialog').close();
+  toast('Imported '+chunks.length+' part(s) in meters.'
+    +(state.cleanup.ready?'':' The posed assembly needs repair; open the cleanup summary and try Seal openings.')
+    +simplifiedNote(reduction));
+}
+
+function loadProject(p){if(!['AeroDesk','SkyLabs'].includes(p?.format)||p.version!==1||!Array.isArray(p.vertices)||p.vertices.length<36||p.vertices.length%9||p.vertices.length>1800000||!p.vertices.every(v=>typeof v==='number'&&Number.isFinite(v)&&Math.abs(v)<100))throw Error('This is not a valid SkyLabs project.');validateSettings(p.settings);const assessment=assessmentOptions(p.assessment),studies=validateStudies(p.studies||[]);for(const row of studies)validateSettings(row.settings);let source=null;if(p.source){const u=new URL(p.source);if(u.protocol!=='https:'||!/^([a-z0-9-]+\.)+onshape\.com$/i.test(u.hostname))throw Error('Invalid Onshape link in project.');source=u.href;}const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(p.vertices,3));installGeometry(g,p.name||'Model',source);g.dispose();applySettings(p.settings);if(p.repair?.rebuiltExterior===true){state.cleanup.rebuiltExterior=true;state.cleanup.unionNote="Approximate exterior rebuild. Small details and gaps may differ from the original CAD. Rebuild resolution: 384 cells across the model.";showCleanup();}state.jointConfiguration=readJointConfiguration(p.jointConfiguration);applyMaterial(p.material);applyAssessmentOptions(assessment);state.studies=studies;state.selectedStudy=p.selectedStudy||null;if(p.studySetup){$('studyPitch').value=String(p.studySetup.pitch||'0');$('studyYaw').value=String(p.studySetup.yaw||'0');$('studyGrid').checked=!!p.studySetup.grid;$('studyQuality').value=qualityMode(p.studySetup);}rebuildModel();updateFacts();updateAnalysis();renderStudies();}
 async function save(kind,name,data){if(await api.save({kind,name,data}))toast('Saved successfully.');}
-function csvData(){const s=state.settings;if(state.result?.engine==='openfoam')return ['# AeroDesk 0.14.0 — OpenFOAM v2512 simpleFoam kOmegaSST','# Status: '+$('stateBadge').textContent,'# Quality: '+(s.qualityMode||'legacy')+'; numerical_checks: '+(state.result.reliability?.status||'not-recorded'),'# Quality_notes: '+[...(state.result.reliability?.blocking||[]),...(state.result.reliability?.warnings||[])].join(' '),'# Environment: '+environmentLabel(s),'# density_kg_m3: '+s.density,'# Forces: flow-induced only; no hydrostatic buoyancy','# Reynolds_number_used: '+reynoldsNumber(s),'# reference_area_basis: '+(s.referenceAreaKind||'entered'),'# turbulent_viscosity_ratio: '+(s.turbulenceRatio??10),'# nu_m2_s: '+s.nu+'; reference_area_m2: '+s.referenceArea+'; speed_m_s: '+s.speed+'; length_m: '+s.length,'iteration,drag_coefficient,lift_y_coefficient,side_z_coefficient,drag_N,moment_x_Nm,moment_y_Nm,moment_z_Nm',...state.history.map(a=>[a.iteration,a.cd,a.cy,a.cz,a.drag,a.mx,a.my,a.mz].join(','))].join('\n');return ['# AeroDesk 0.1 — experimental laminar flow; not validated for design','# Model: '+state.name.replace(/[\r\n]/g,' '),'# Status: '+(state.worker?'running':$('stateBadge').textContent),'# Reynolds: '+s.re+'; length_m: '+s.length+'; speed_m_s: '+s.speed+'; density_kg_m3: '+s.density+'; viscosity_m2_s: '+s.speed*s.length/s.re,'# Grid: '+state.grid.nx+'x'+state.grid.ny+'x'+state.grid.nz+'; frontal_area_m2: '+state.area*(state.grid.h*s.length)**2,'iteration,drag_coefficient,lift_y_coefficient,side_z_coefficient,drag_N,relative_flow_change',...state.history.map(a=>[a.iteration,a.cd,a.cy,a.cz,a.drag,a.change].join(','))].join('\n');}
-function vtkData(){const {grid:g,result:d,settings:s}=state,h=g.h*s.length,origin=g.origin.map(v=>v*s.length+h/2);const lines=['# vtk DataFile Version 3.0',d.engine==='openfoam'?'AeroDesk OpenFOAM sampled field — inspect convergence':'AeroDesk experimental low-Re flow — unvalidated','ASCII','DATASET STRUCTURED_POINTS',`DIMENSIONS ${g.nx} ${g.ny} ${g.nz}`,`ORIGIN ${origin.join(' ')}`,`SPACING ${h} ${h} ${h}`,`POINT_DATA ${g.N}`,'VECTORS velocity_m_s float'];for(let i=0;i<g.N;i++)lines.push([d.ux[i],d.uy[i],d.uz[i]].map(v=>(d.engine==='openfoam'?v:v*s.speed/U0).toPrecision(6)).join(' '));lines.push('SCALARS pressure_relative_Pa float 1','LOOKUP_TABLE default');for(let i=0;i<g.N;i++)lines.push((d.engine==='openfoam'?d.pressure[i]*s.density:(d.rho[i]-1)/3*s.density*(s.speed/U0)**2).toPrecision(6));if(d.engine==='openfoam'){for(const [name,values] of [['Q_s-2',d.q],['turbulent_energy_m2_s2',d.tke]])if(values){lines.push('SCALARS '+name+' float 1','LOOKUP_TABLE default');for(const value of values)lines.push(Number.isFinite(value)?value.toPrecision(6):'nan');}if(d.vorticity){lines.push('VECTORS vorticity_s-1 float');for(let i=0;i<g.N;i++)lines.push(Array.from(d.vorticity.slice(i*3,i*3+3)).map(v=>Number.isFinite(v)?v.toPrecision(6):'nan').join(' '));}}lines.push('SCALARS solid int 1','LOOKUP_TABLE default');for(const v of state.solid)lines.push(String(v));return lines.join('\n');}
+function csvData(){const s=state.settings;if(state.result?.engine==='openfoam')return ['# SkyLabs 0.14.0 — OpenFOAM v2512 simpleFoam kOmegaSST','# Status: '+$('stateBadge').textContent,'# Quality: '+(s.qualityMode||'legacy')+'; numerical_checks: '+(state.result.reliability?.status||'not-recorded'),'# Quality_notes: '+[...(state.result.reliability?.blocking||[]),...(state.result.reliability?.warnings||[])].join(' '),'# Environment: '+environmentLabel(s),'# density_kg_m3: '+s.density,'# Forces: flow-induced only; no hydrostatic buoyancy','# Reynolds_number_used: '+reynoldsNumber(s),'# reference_area_basis: '+(s.referenceAreaKind||'entered'),'# turbulent_viscosity_ratio: '+(s.turbulenceRatio??10),'# nu_m2_s: '+s.nu+'; reference_area_m2: '+s.referenceArea+'; speed_m_s: '+s.speed+'; length_m: '+s.length,'iteration,drag_coefficient,lift_y_coefficient,side_z_coefficient,drag_N,moment_x_Nm,moment_y_Nm,moment_z_Nm',...state.history.map(a=>[a.iteration,a.cd,a.cy,a.cz,a.drag,a.mx,a.my,a.mz].join(','))].join('\n');return ['# SkyLabs 0.1 — experimental laminar flow; not validated for design','# Model: '+state.name.replace(/[\r\n]/g,' '),'# Status: '+(state.worker?'running':$('stateBadge').textContent),'# Reynolds: '+s.re+'; length_m: '+s.length+'; speed_m_s: '+s.speed+'; density_kg_m3: '+s.density+'; viscosity_m2_s: '+s.speed*s.length/s.re,'# Grid: '+state.grid.nx+'x'+state.grid.ny+'x'+state.grid.nz+'; frontal_area_m2: '+state.area*(state.grid.h*s.length)**2,'iteration,drag_coefficient,lift_y_coefficient,side_z_coefficient,drag_N,relative_flow_change',...state.history.map(a=>[a.iteration,a.cd,a.cy,a.cz,a.drag,a.change].join(','))].join('\n');}
+function vtkData(){const {grid:g,result:d,settings:s}=state,h=g.h*s.length,origin=g.origin.map(v=>v*s.length+h/2);const lines=['# vtk DataFile Version 3.0',d.engine==='openfoam'?'SkyLabs OpenFOAM sampled field — inspect convergence':'SkyLabs experimental low-Re flow — unvalidated','ASCII','DATASET STRUCTURED_POINTS',`DIMENSIONS ${g.nx} ${g.ny} ${g.nz}`,`ORIGIN ${origin.join(' ')}`,`SPACING ${h} ${h} ${h}`,`POINT_DATA ${g.N}`,'VECTORS velocity_m_s float'];for(let i=0;i<g.N;i++)lines.push([d.ux[i],d.uy[i],d.uz[i]].map(v=>(d.engine==='openfoam'?v:v*s.speed/U0).toPrecision(6)).join(' '));lines.push('SCALARS pressure_relative_Pa float 1','LOOKUP_TABLE default');for(let i=0;i<g.N;i++)lines.push((d.engine==='openfoam'?d.pressure[i]*s.density:(d.rho[i]-1)/3*s.density*(s.speed/U0)**2).toPrecision(6));if(d.engine==='openfoam'){for(const [name,values] of [['Q_s-2',d.q],['turbulent_energy_m2_s2',d.tke]])if(values){lines.push('SCALARS '+name+' float 1','LOOKUP_TABLE default');for(const value of values)lines.push(Number.isFinite(value)?value.toPrecision(6):'nan');}if(d.vorticity){lines.push('VECTORS vorticity_s-1 float');for(let i=0;i<g.N;i++)lines.push(Array.from(d.vorticity.slice(i*3,i*3+3)).map(v=>Number.isFinite(v)?v.toPrecision(6):'nan').join(' '));}}lines.push('SCALARS solid int 1','LOOKUP_TABLE default');for(const v of state.solid)lines.push(String(v));return lines.join('\n');}
 async function showOnshape(){const c=await api.onshapeStatus();$('connectionState').textContent=c.connected?'Keys saved for '+c.origin:'Not connected · set up once below';$('credentials').open=!c.connected;$('disconnect').disabled=!c.connected;$('onshapeUrl').value=state.source||'';$('onshapeError').textContent='';$('onshapeDialog').showModal();$('onshapeBrowser').classList.toggle('hidden',!c.connected);if(c.connected)await browseDocuments();}
 async function importOnshape(link){setBusy(true);$('stop').disabled=true;$('status').textContent='Downloading the Part Studio from Onshape…';try{const f=await api.onshapeImport(link),g=await parseModel(f);g.rotateX(-Math.PI/2);if(g.userData?.parts)g.userData.parts=g.userData.parts.map(p=>{const v=p.slice();for(let i=0;i<v.length;i+=3){v[i+1]=p[i+2];v[i+2]=-p[i+1];}return v;});let reduction=null;if(triangleCount(g.getAttribute('position')?.array||[])>DECIMATE_TARGET_TRIANGLES){$('status').textContent='Simplifying a large Onshape model…';reduction=reduceGeometry(g);}const selectedStudio=browseStudios.find(x=>x.link===link.split('?')[0]);const selectedName=link===state.source?state.name:selectedStudio?selectedStudio.name+($('onshapePart').value?' · '+$('onshapePart').selectedOptions[0].text:''):f.name;$('status').textContent='Cleaning Onshape geometry…';try{const cleaned=await prepareImport(g);installGeometry(g,selectedName,f.link,true,cleaned);}finally{g.dispose();}document.querySelectorAll('[data-sample]').forEach(b=>b.classList.remove('selected'));$('onshapeDialog').close();await useOnshapeMaterial(true).catch(e=>{$('materialSource').textContent='Material lookup unavailable: '+e.message;});toast((f.workspace?'Imported in meters. Refresh anytime after editing in Onshape.':'Imported a fixed Onshape version. Use a workspace link to follow design changes.')+simplifiedNote(reduction));}catch(e){$('status').textContent='Onshape import failed. Your existing model is still available.';throw e;}finally{setBusy(false);}}
 $('connect').onclick=async()=>{try{$('connect').disabled=true;$('onshapeError').textContent='Verifying read access with Onshape…';const c=await api.onshapeConnect({origin:$('onshapeOrigin').value,access:$('accessKey').value,secret:$('secretKey').value});$('accessKey').value=$('secretKey').value='';$('connectionState').textContent='Connected to '+c.origin+' · read access verified';$('credentials').open=false;$('disconnect').disabled=false;$('onshapeError').textContent='';$('onshapeBrowser').classList.remove('hidden');await browseDocuments();}catch(e){$('onshapeError').textContent=errorText(e);}finally{$('connect').disabled=false;}};
@@ -247,7 +570,7 @@ $('disconnect').onclick=handle(async()=>{await api.onshapeDisconnect();$('onshap
 $('onshapeHelp').onclick=handle(()=>api.onshapeHelp());$('onshape').onclick=handle(showOnshape);$('refreshOnshape').onclick=handle(()=>importOnshape(state.source));
 $('openCase').onclick=handle(()=>api.foamCase(state.result?.folder));$('saveCleaned').onclick=handle(()=>save('stl',state.name.replace(/\.(stl|obj)$/i,'')+'-cleaned',cleanedSTL()));$('run').onclick=handle(()=>startRun());$('stop').onclick=stopRun;$('importModel').onclick=handle(openModel);
 $('openProject').onclick=handle(async()=>{const f=await api.open('project');if(f){loadProject(JSON.parse(new TextDecoder().decode(f.bytes)));await reopenSelectedStudy();};});$('saveProject').onclick=handle(()=>save('project',state.name.replace(/\.(stl|obj)$/i,''),JSON.stringify(projectData())));
-$('exportCSV').onclick=handle(()=>save('csv','AeroDesk-results',csvData()));$('exportVTK').onclick=handle(()=>save('vtk','AeroDesk-flow',vtkData()));
+$('exportCSV').onclick=handle(()=>save('csv','SkyLabs-results',csvData()));$('exportVTK').onclick=handle(()=>save('vtk','SkyLabs-flow',vtkData()));
 document.querySelectorAll('[data-sample]').forEach(b=>b.onclick=()=>sample(b.dataset.sample));
 for(const id of ['fluidMedium','groundMode','groundClearance','length','speed','yaw','pitch','roll','re','quality','steps','density','engine','ransQuality','cpuWorkers','computeBackend','nu','roughness','referenceArea','intensity','turbulenceRatio'])$(id).addEventListener('change',()=>{if(id==='fluidMedium'){const preset=fluidPresets[$('fluidMedium').value];$('density').value=preset.density;$('nu').value=preset.nu;}if(id==='groundMode'&&+$('groundClearance').value>5*+$('length').value)$('groundClearance').value=.1*+$('length').value;if($('fluidMedium').value==='water'||$('groundMode').value!=='none')$('engine').value='openfoam';if(id==='referenceArea')state.referenceAreaKind='entered';if(id==='length'&&state.referenceAreaKind==='model-projection')estimateReferenceArea();updateAreaBasis();syncReynoldsInput();invalidate();if(['yaw','pitch','roll'].includes(id))rebuildModel();updatePlan();});
 $('ransRe').addEventListener('change',()=>{try{$('ransRe').setCustomValidity('');$('speed').value=String(speedForReynolds(+$('ransRe').value,+$('length').value,+$('nu').value));syncReynoldsInput();invalidate();}catch(e){$('ransRe').setCustomValidity(e.message);invalidate();$('status').textContent=e.message;toast(e.message);}});
@@ -260,6 +583,18 @@ document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>selectView(b.d
 for(const id of ['materialName','materialDensity','cgMode','cgX','cgY','cgZ'])$(id).addEventListener('change',handle(()=>{applyMaterial(readMaterial());updateAnalysis();}));
 $('centersToggle').onclick=()=>{state.showCenters=state.showCenters===false;centersGroup.visible=state.showCenters;$('centersToggle').setAttribute('aria-pressed',String(state.showCenters));};
 window.addEventListener('keydown',e=>{if(e.key==='Escape'&&!document.querySelector('dialog[open]')&&!['INPUT','SELECT','TEXTAREA'].includes(document.activeElement?.tagName))resetView();});
+$('openAssembly').onclick=handle(async()=>{const link=$('onshapeUrl').value;if(!link)throw Error('Choose an Assembly tab first.');try{await openAssemblyDialog(link);}catch(e){$('assemblyError').textContent='';$('onshapeError').textContent=errorText(e);throw e;}});
+$('applyAssembly').onclick=handle(async()=>{if(busy)return;setBusy(true);$('stop').disabled=true;try{await applyAssemblyConfiguration();}catch(e){$('assemblyError').textContent=errorText(e);throw e;}finally{setBusy(false);}});
+$('resetJoints').onclick=()=>{if(!assemblyState)return;assemblyState.values={};renderJoints();schedulePreview();};
+$('saveConfig').onclick=()=>{
+ if(!assemblyState)return;
+ const name=$('configName').value.trim();
+ if(!name){$('assemblyError').textContent='Name the configuration before saving it.';return;}
+ const values=normalizeConfiguration(assemblyState.assembly,assemblyState.values);
+ assemblyState.configs=[...assemblyState.configs.filter(c=>c.name!==name),{name:name.slice(0,60),values}];
+ $('configName').value='';$('assemblyError').textContent='';renderConfigs();
+};
+window.addEventListener('resize',()=>{if($('assemblyDialog').open)drawPreview();});
 $('resetView').onclick=resetView;$('help').onclick=$('methodLink').onclick=()=>$('helpDialog').showModal();document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>$(b.dataset.close).close());
 initAnalysisUI();sample('sphere');
 window.connectionProof=async()=>{await showOnshape();return api.onshapeStatus();};
@@ -539,7 +874,7 @@ function surfaceCSV(){
 }
 function analysisReport(){
   const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),r=state.result,l=r.liftCenter,s=state.settings;
-  return '<!doctype html><html><meta charset="utf-8"><title>AeroDesk analysis</title><style>body{font:15px system-ui;color:#23394a;max-width:950px;margin:50px auto;padding:20px}h1{font-size:32px}table{border-collapse:collapse;width:100%;margin:20px 0}td,th{padding:10px;border-bottom:1px solid #dbe4ea;text-align:right}th:first-child{text-align:left}img{width:100%;border:1px solid #ddd}small{color:#61778a}@media print{body{margin:0}h2{break-after:avoid}table,img{break-inside:avoid}}</style><h1>'+esc(state.name)+' · analysis</h1><p>'+new Date().toISOString()+' · AeroDesk 0.14.0 · OpenFOAM v2512, steady RANS k–ω SST</p><p>'+esc(environmentLabel(s))+'. Forces exclude hydrostatic buoyancy.</p><p>U='+s.speed+' m/s; Re='+scientificReynolds(reynoldsNumber(s))+'; ρ='+s.density+' kg/m³; ν='+s.nu+' m²/s; reference area='+s.referenceArea+' m² ('+esc(s.referenceAreaKind==='model-projection'?'estimated full-model projection, including tail and body':'entered reference area')+'); roughness Ks='+(s.roughness||0)+' m.</p><img src="'+renderer.domElement.toDataURL('image/png')+'"><p>Displayed field: '+esc(fields[state.mode]?.label||state.mode)+'. '+esc($('viewportInfo').textContent)+'. '+($('legend').classList.contains('hidden')?'':esc($('scaleNote').textContent)+'. Range '+number(state.displayScale?.min)+' to '+number(state.displayScale?.max))+'.</p><h2>Forces · N</h2><table><tr><th>Direction</th><th>Pressure</th><th>Friction</th><th>Total</th></tr>'+$('forceTable').innerHTML+'</table><h2>Moments · N·m</h2><table><tr><th>Axis</th><th>Model center</th><th>CG</th></tr>'+$('momentTable').innerHTML+'</table><p>Lift / drag: '+esc($('efficiency').textContent)+'; drag power: '+esc($('dragPower').textContent)+'.</p><h2>Balance</h2><p>CG: '+esc($('cgResult').textContent)+' m. Center of lift at CG height: '+esc($('clResult').textContent)+' m.</p><p>'+esc($('centerConfidence').textContent)+' '+esc($('centerLoadBalance').textContent)+'</p><p>CG is a uniform-solid estimate unless manually entered. The displayed lift line uses signed vertical surface forces. Drag and side-force moments are separate. This is not the aerodynamic center or a stability prediction.</p>'+planeReportHTML()+studyReportHTML()+'<h2>Computed regions</h2><p>'+esc($('hotspotList').textContent)+'</p><h2>Stability studies</h2><p>'+esc($('sweepFindings').textContent||'Not performed')+'</p><h2>AI suggestions</h2><p>'+esc(state.aiReview?.text||'Not requested')+'</p><h2>Quality</h2><p>'+esc($('meshInfo').textContent)+'. y+: '+esc($('yPlusInfo').textContent)+'. Cd stability: '+esc($('forceStability').textContent)+'.</p><p>'+esc($('reliabilitySummary').textContent)+'</p><p>'+esc($('meshComparison').textContent)+'</p><p>'+esc($('qualityAdvice').textContent)+'</p><small>Surface colors interpolate native wall-face data onto CAD. Velocity colors sample outside the surface. No transient, multiphase, aeroacoustic or adjoint solver is included.</small></html>';
+  return '<!doctype html><html><meta charset="utf-8"><title>SkyLabs analysis</title><style>body{font:15px system-ui;color:#23394a;max-width:950px;margin:50px auto;padding:20px}h1{font-size:32px}table{border-collapse:collapse;width:100%;margin:20px 0}td,th{padding:10px;border-bottom:1px solid #dbe4ea;text-align:right}th:first-child{text-align:left}img{width:100%;border:1px solid #ddd}small{color:#61778a}@media print{body{margin:0}h2{break-after:avoid}table,img{break-inside:avoid}}</style><h1>'+esc(state.name)+' · analysis</h1><p>'+new Date().toISOString()+' · SkyLabs 0.14.0 · OpenFOAM v2512, steady RANS k–ω SST</p><p>'+esc(environmentLabel(s))+'. Forces exclude hydrostatic buoyancy.</p><p>U='+s.speed+' m/s; Re='+scientificReynolds(reynoldsNumber(s))+'; ρ='+s.density+' kg/m³; ν='+s.nu+' m²/s; reference area='+s.referenceArea+' m² ('+esc(s.referenceAreaKind==='model-projection'?'estimated full-model projection, including tail and body':'entered reference area')+'); roughness Ks='+(s.roughness||0)+' m.</p><img src="'+renderer.domElement.toDataURL('image/png')+'"><p>Displayed field: '+esc(fields[state.mode]?.label||state.mode)+'. '+esc($('viewportInfo').textContent)+'. '+($('legend').classList.contains('hidden')?'':esc($('scaleNote').textContent)+'. Range '+number(state.displayScale?.min)+' to '+number(state.displayScale?.max))+'.</p><h2>Forces · N</h2><table><tr><th>Direction</th><th>Pressure</th><th>Friction</th><th>Total</th></tr>'+$('forceTable').innerHTML+'</table><h2>Moments · N·m</h2><table><tr><th>Axis</th><th>Model center</th><th>CG</th></tr>'+$('momentTable').innerHTML+'</table><p>Lift / drag: '+esc($('efficiency').textContent)+'; drag power: '+esc($('dragPower').textContent)+'.</p><h2>Balance</h2><p>CG: '+esc($('cgResult').textContent)+' m. Center of lift at CG height: '+esc($('clResult').textContent)+' m.</p><p>'+esc($('centerConfidence').textContent)+' '+esc($('centerLoadBalance').textContent)+'</p><p>CG is a uniform-solid estimate unless manually entered. The displayed lift line uses signed vertical surface forces. Drag and side-force moments are separate. This is not the aerodynamic center or a stability prediction.</p>'+planeReportHTML()+studyReportHTML()+'<h2>Computed regions</h2><p>'+esc($('hotspotList').textContent)+'</p><h2>Stability studies</h2><p>'+esc($('sweepFindings').textContent||'Not performed')+'</p><h2>AI suggestions</h2><p>'+esc(state.aiReview?.text||'Not requested')+'</p><h2>Quality</h2><p>'+esc($('meshInfo').textContent)+'. y+: '+esc($('yPlusInfo').textContent)+'. Cd stability: '+esc($('forceStability').textContent)+'.</p><p>'+esc($('reliabilitySummary').textContent)+'</p><p>'+esc($('meshComparison').textContent)+'</p><p>'+esc($('qualityAdvice').textContent)+'</p><small>Surface colors interpolate native wall-face data onto CAD. Velocity colors sample outside the surface. No transient, multiphase, aeroacoustic or adjoint solver is included.</small></html>';
 }
 function placeCenterLabels(){for(const id of ['cgLabel','clLabel']){$(id).classList.add('hidden');$(id+'Line').style.display='none';}return;
 
@@ -561,7 +896,7 @@ function initAnalysisUI(){
   $('colorRange').onchange=handle(()=>{if(state.mode==='section')state.sliceColorMode=$('colorRange').value;drawFlow();});for(const id of ['colorMin','colorMax'])$(id).onchange=handle(()=>{fieldScale([],state.mode,'manual',[+$('colorMin').value,+$('colorMax').value]);drawFlow();});
   $('meshToggle').onchange=()=>drawFlow();$('lineDensity').onchange=()=>drawFlow();$('linePlane').onchange=()=>{$('linePositionControl').classList.toggle('hidden',state.mode!=='flow'||$('linePlane').value==='all');drawFlow();};$('linePosition').oninput=queueStreamlineDraw;$('linePosition').onchange=queueStreamlineDraw;for(const id of ['slicePlane','volumeField','isoThreshold','isoDetail'])$(id).onchange=handle(drawFlow);$('slicePosition').oninput=queueSliceDraw;$('slicePosition').onchange=queueSliceDraw;$('gridToggle').onchange=()=>{floor.visible=tunnel.visible=$('gridToggle').checked;arrow.visible=true;};
   $('focusView').onclick=()=>{const focus=document.body.classList.toggle('focus-view');$('focusView').textContent=focus?'← Setup':'⛶ Focus';$('focusView').setAttribute('aria-pressed',String(focus));setTimeout(()=>selectView(state.selectedView),50);};
-  $('exportSurface').onclick=handle(()=>save('csv','AeroDesk-surface-loads',surfaceCSV()));$('exportReport').onclick=handle(()=>{renderer.render(scene,camera);return save('pdf','AeroDesk-analysis',analysisReport());});
+  $('exportSurface').onclick=handle(()=>save('csv','SkyLabs-surface-loads',surfaceCSV()));$('exportReport').onclick=handle(()=>{renderer.render(scene,camera);return save('pdf','SkyLabs-analysis',analysisReport());});
   $('chartQuantity').onchange=drawChart;
   let down;renderer.domElement.addEventListener('pointerdown',e=>down=[e.clientX,e.clientY]);
   renderer.domElement.addEventListener('pointerup',e=>{if(!down||Math.hypot(e.clientX-down[0],e.clientY-down[1])>4||!fields[state.mode]||['flow','slice'].includes(state.mode))return;
@@ -637,6 +972,101 @@ window.checkAnalysisResult=()=>{
 };
 window.qaAnalysisView=async mode=>{selectMode(mode);selectView(mode==='section'?'left':'iso');if(mode==='pressure')document.body.classList.add('focus-view');if(mode==='friction')document.querySelector('.results').scrollTop=document.querySelector('.results').scrollHeight;await new Promise(resolve=>setTimeout(resolve,300));selectView(mode==='section'?'left':'iso');renderer.render(scene,camera);return {mode,isoTriangles:state.isoTriangles,sliceCells:state.sliceCells};};
 window.qaAnalysisReport=()=>analysisReport();
+// Drives the whole joints dialog - STL parsing, mate reading, posing, preview and the
+// real import pipeline - against a synthetic assembly, so the feature is verifiable
+// without a live Onshape document.
+window.qaAssembly=async()=>{
+ // A minimal binary STL box, in metres, centred on its own origin.
+ const boxSTL=(sx,sy,sz)=>{
+  const h=[sx/2,sy/2,sz/2],c=[];
+  for(const s of [-1,1])for(const a of [0,1,2]){
+   const q=[[0,1,2],[1,2,0],[2,0,1]][a],p=(u,v)=>{const o=[0,0,0];o[q[0]]=s*h[q[0]];o[q[1]]=u*h[q[1]];o[q[2]]=v*h[q[2]];return o;};
+   c.push([p(-1,-1),p(s,-s*1),p(1,1)],[p(-1,-1),p(1,1),p(-s,s*1)]);
+  }
+  const buf=new ArrayBuffer(84+c.length*50),view=new DataView(buf);
+  view.setUint32(80,c.length,true);
+  c.forEach((tri,i)=>{const o=84+i*50;for(let j=0;j<3;j++)view.setFloat32(o+j*4,0,true);
+   tri.forEach((v,k)=>v.forEach((n,m)=>view.setFloat32(o+12+k*12+m*4,n,true)));});
+  return new Uint8Array(buf);
+ };
+ const T4=(x,y,z)=>[1,0,0,x,0,1,0,y,0,0,1,z,0,0,0,1];
+ const definition={rootAssembly:{
+  instances:[
+   {id:'wing',name:'Wing',type:'Part',partId:'PW',documentId:'a'.repeat(24),documentMicroversion:'d'.repeat(24),elementId:'c'.repeat(24)},
+   {id:'aileron',name:'Aileron',type:'Part',partId:'PA',documentId:'a'.repeat(24),documentMicroversion:'d'.repeat(24),elementId:'c'.repeat(24)},
+  ],
+  occurrences:[{path:['wing'],transform:T4(0,0,0)},{path:['aileron'],transform:T4(.35,0,0)}],
+  features:[{id:'hinge',featureData:{name:'Aileron hinge',
+   parameters:[{parameterId:'mateType',value:'REVOLUTE'},{parameterId:'mateLimitsEnabled',value:true},
+    {parameterId:'limitAxialZMin',expression:'-25 deg'},{parameterId:'limitAxialZMax',expression:'25 deg'}],
+   matedEntities:[
+    {matedOccurrence:['aileron'],matedCS:{origin:[.25,0,0],xAxis:[1,0,0],yAxis:[0,0,1],zAxis:[0,1,0]}},
+    {matedOccurrence:['wing'],matedCS:{origin:[.25,0,0],xAxis:[1,0,0],yAxis:[0,0,1],zAxis:[0,1,0]}}]}}],
+ }};
+ const meshes={};
+ meshes[['a'.repeat(24),'d'.repeat(24),'c'.repeat(24),'PW',''].join('|')]=boxSTL(.5,.4,.06);
+ meshes[['a'.repeat(24),'d'.repeat(24),'c'.repeat(24),'PA',''].join('|')]=boxSTL(.2,.38,.04);
+
+ window.__qaStep='installAssembly';
+ installAssembly({definition,meshes,link:null,workspace:true,name:'QA assembly'},'QA assembly');
+ window.__qaStep='showModal';
+ $('assemblyDialog').showModal();
+ window.__qaStep='posed';
+ const joints=assemblyState.assembly.joints;
+ const rest=assemblyChunks();
+ const restTip=Math.max(...Array.from({length:rest[1].length/3},(_,i)=>rest[1][i*3+2]));
+
+ // Drive the hinge past its limit; the stored value must come back clamped.
+ assemblyState.values.hinge={angle:60};
+ renderJoints();updatePreview();
+ const posed=assemblyChunks();
+ const posedTip=Math.max(...Array.from({length:posed[1].length/3},(_,i)=>posed[1][i*3+2]));
+ const stored=normalizeConfiguration(assemblyState.assembly,assemblyState.values);
+
+ // The wing must not have moved.
+ let wingMoved=0;
+ for(let i=0;i<rest[0].length;i++)wingMoved=Math.max(wingMoved,Math.abs(rest[0][i]-posed[0][i]));
+
+ window.__qaStep='settle';
+ await new Promise(r=>setTimeout(r,50));
+ window.__qaStep='collect';
+ const shot={joints:joints.length,drivable:joints.filter(j=>j.drivable).length,
+  parts:assemblyState.parts.length,restTip,posedTip,wingMoved,
+  storedAngle:stored.hinge&&stored.hinge.angle,
+  stats:$('assemblyStats').textContent,
+  jointRows:document.querySelectorAll('#jointList .joint-row').length,
+  partRows:document.querySelectorAll('#partList .part-row').length};
+
+ // Save and restore a configuration.
+ $('configName').value='aileron 25';$('saveConfig').click();
+ assemblyState.values={};renderJoints();
+ document.querySelector('#configList .config-row button').click();
+ shot.restoredAngle=assemblyState.values.hinge&&assemblyState.values.hinge.angle;
+ shot.configRows=document.querySelectorAll('#configList .config-row').length;
+ window.__qaShot=shot;
+
+ // The import itself is a separate call so the harness can photograph the open
+ // dialog before the model replaces it.
+ window.__qaStep='ready';
+ return shot;
+};
+
+window.qaAssemblyApply=async()=>{
+ const shot=window.__qaShot;
+ window.__qaStep='apply';
+ await applyAssemblyConfiguration();
+ window.__qaStep='done';
+ shot.imported=!!state.base;
+ shot.name=state.name;
+ shot.triangles=state.base.attributes.position.count/3;
+ shot.cleanupReady=!!state.cleanup.ready;
+ shot.configuration=state.jointConfiguration;
+ shot.ok=shot.drivable===1&&shot.jointRows===1&&shot.partRows===2&&shot.imported
+  &&shot.storedAngle===25&&shot.restoredAngle===25&&shot.wingMoved<1e-9
+  &&Math.abs(shot.posedTip-shot.restTip)>.01;
+ return shot;
+};
+
 
 function installRansResult(d,s){if(d.resultId&&!state.loadingStudy&&!state.studyRunning)rememberStudy(d,s);state.spatial=null;clearAdviceMarkers();state.result=d;state.grid=d.grid;state.solid=d.solid;state.history=d.history;state.elapsed=d.elapsed;state.area=s.referenceArea;$('coefficientBasis').textContent=s.referenceAreaKind==='model-projection'?'Using estimated full-model area':'Using entered reference area';const last=d.history.at(-1);$('cd').textContent=last.cd.toFixed(4);$('lift').textContent=last.cy.toFixed(4);$('drag').textContent=last.drag.toPrecision(5);$('change').textContent=d.change.toExponential(2);$('areaValue').textContent=s.referenceArea.toPrecision(4)+' m²';$('elapsed').textContent=d.elapsed.toFixed(1)+' s';$('iteration').textContent=d.iteration+' iterations · '+d.cells.toLocaleString()+' cells · '+(d.execution?.backend==='gpu'?'GPU pressure + CPU':(d.execution?.workers||1)+' CPU worker'+((d.execution?.workers||1)===1?'':'s'));$('progress').style.width='100%';$('stateBadge').textContent=d.reliability?.acceptable?'Numerical checks passed':d.converged?'Converged · review quality':'Unconverged · review quality';updateFacts();$('status').textContent=(d.converged?'Residual and load targets met.':'Partial result: convergence targets were not met.')+' '+(d.reliability?.acceptable?'Numerical checks passed; experimental accuracy remains unvalidated.':'Inspect Quality for remaining limitations.');$('viewportInfo').textContent='OPENFOAM RANS · SAMPLED VELOCITY';$('emptyHint').classList.add('hidden');$('legend').classList.toggle('hidden',state.mode==='model');$('exportCSV').disabled=$('exportVTK').disabled=false;drawFlow();drawChart();}
 window.restoreSavedResult=async()=>{const s=settings();const d=await api.foamRestore({settings:s,vertices:state.mesh.geometry.attributes.position.array});state.settings=s;installRansResult(d,s);$('openCase').disabled=false;return {ok:true,cells:d.cells,last:d.history.at(-1)};};

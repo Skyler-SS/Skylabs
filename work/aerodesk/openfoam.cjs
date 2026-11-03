@@ -18,7 +18,7 @@ async function runtime(){
   const suffix='OpenFOAM-runtime/msys64/home/ofuser/OpenFOAM/OpenFOAM-v2512';
   const candidates=[process.env.AERODESK_OPENFOAM_ROOT,path.resolve(__dirname,'../../outputs',suffix),path.resolve(path.dirname(process.execPath),'../../',suffix),path.resolve(path.dirname(process.execPath),'../',suffix)];
   for(const root of candidates.filter(Boolean)){const bin=path.join(root,'platforms/win64MingwDPInt32Opt/bin');if(await exists(path.join(bin,'simpleFoam.exe')))return {root,bin,mpi:mpiExecutable(),parallelBin:path.join(root,'platforms/win64MingwDPInt32Opt/aerodesk-mpi'),env:{...process.env,WM_PROJECT_DIR:root,WM_PROJECT_VERSION:'v2512',FOAM_ETC:path.join(root,'etc'),PATH:bin+';'+process.env.PATH}};}
-  throw Error('OpenFOAM runtime is missing. Keep the OpenFOAM-runtime folder beside the AeroDesk version folder.');
+  throw Error('OpenFOAM runtime is missing. Keep the OpenFOAM-runtime folder beside the SkyLabs version folder.');
 }
 function validate(s,vertices){
   quality.qualityMode(s);environment(s);
@@ -77,7 +77,7 @@ nSmoothScale 4;errorReduction .75;} writeFlags (scalarLevels layerSets layerFiel
   const control=header('controlDict')+(s.computeBackend==='gpu'?'libs (\"libpetscFoam.so\");\n':'')+`application simpleFoam;startFrom startTime;startTime 0;stopAt endTime;endTime ${p.iterations};deltaT 1;writeControl timeStep;writeInterval 250;purgeWrite 2;writeFormat ascii;writePrecision 12;writeCompression off;timeFormat general;timePrecision 8;runTimeModifiable true;
 functions {wallShearStress {type wallShearStress;libs (fieldFunctionObjects);patches (${ground?'model ground':'model'});writeControl writeTime;} coefficients {type forceCoeffs;libs (forces);writeControl timeStep;writeInterval 1;log yes;patches (model);rho rhoInf;rhoInf ${s.density};CofR (0 0 0);liftDir (0 1 0);dragDir (1 0 0);pitchAxis (0 0 1);magUInf ${U};lRef ${L};Aref ${s.referenceArea};} yPlus {type yPlus;libs (fieldFunctionObjects);writeControl writeTime;log true;}}
 `;
-  await write('system/controlDict',control);await write('AeroDesk.foam','');
+  await write('system/controlDict',control);await write('SkyLabs.foam','');
   // A dense, geometry-focused display grid. The native case retains the full solver mesh.
   const grid=displayGrid(p.bounds);
   await writeViewerSampling(folder,grid,L);
@@ -126,7 +126,7 @@ class Job {
     this.notify({stage:'Wall layers checked',layerCoverage:layerPreflight,warning:preflightWarning});
     const workers=rt.gpu?1:chooseWorkers(s.cpuWorkers??'auto',p.hw.logicalCores,cells,!!rt.mpi),execution={backend:rt.gpu?'gpu':'cpu',device:rt.device,scope:rt.gpu?'CUDA pressure linear algebra; meshing, momentum and turbulence on CPU':undefined,workers,mpi:workers>1?'Microsoft MPI':null};
     if(workers>1){
-      if(!await exists(path.join(rt.parallelBin,'simpleFoam.exe'))||!await exists(path.join(rt.parallelBin,'libPstream.dll')))throw Error('Parallel OpenFOAM runtime is missing. Choose 1 CPU worker or repair the AeroDesk runtime.');
+      if(!await exists(path.join(rt.parallelBin,'simpleFoam.exe'))||!await exists(path.join(rt.parallelBin,'libPstream.dll')))throw Error('Parallel OpenFOAM runtime is missing. Choose 1 CPU worker or repair the SkyLabs runtime.');
       await fs.writeFile(path.join(this.folder,'system/decomposeParDict'),header('decomposeParDict')+'numberOfSubdomains '+workers+';method scotch;');
       await this.command(rt,'decomposePar');
     }

@@ -15,7 +15,7 @@ async function main(){
  if(!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(manifest.version))throw Error('Invalid release version');
  const {packager}=await import('@electron/packager');
  const out=path.resolve(__dirname,'../../outputs/releases','v'+manifest.version);
- const folders=await packager({dir:__dirname,name:'AeroDesk',platform:'win32',arch:'x64',out,icon:path.join(__dirname,'app.ico'),asar:{unpackDir:'vendor'},overwrite:true,ignore});
+ const folders=await packager({dir:__dirname,name:'SkyLabs',platform:'win32',arch:'x64',out,icon:path.join(__dirname,'app.ico'),asar:{unpackDir:'vendor'},overwrite:true,ignore});
  const {listPackage}=await import('@electron/asar');
  for(const folder of folders){
   const archive=path.join(folder,'resources/app.asar'),entries=listPackage(archive).map(name=>name.replaceAll('\\','/').replace(/^\//,''));

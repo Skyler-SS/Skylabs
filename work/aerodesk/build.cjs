@@ -9,4 +9,4 @@ esbuild.buildSync({entryPoints:['src/model-worker.js'],bundle:true,outfile:'dist
 esbuild.buildSync({entryPoints:['src/app.js'],bundle:true,outfile:'dist/app.js',format:'iife',minify:true});
 esbuild.buildSync({entryPoints:['src/worker.js'],bundle:true,outfile:'dist/worker.js',format:'iife',minify:true});
 esbuild.buildSync({entryPoints:['src/clean-worker.js'],bundle:true,outfile:'dist/clean-worker.js',format:'iife',minify:true});
-for (const name of ['index.html','style.css','manual.html']) fs.copyFileSync('src/'+name,'dist/'+name);
+for (const name of ['index.html','style.css','manual.html','mark.svg','icon-256.png']) fs.copyFileSync('src/'+name,'dist/'+name);

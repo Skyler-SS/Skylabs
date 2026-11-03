@@ -1,4 +1,4 @@
-# AeroDesk 0.14.0
+# SkyLabs 0.14.0
 
 Windows x64 desktop application with CAD import, local OpenFOAM RANS studies and
 interactive result viewing.
@@ -10,7 +10,7 @@ interactive result viewing.
 - STEP/3MF/STL/OBJ import, Onshape connection and local Autodesk Fusion bridge.
 - Portable distribution with manual, dependency notices and CAD-library source.
 
-Extract the ZIP and open `AeroDesk-win32-x64/AeroDesk.exe`. Read `RUNTIME.md`:
+Extract the ZIP and open `SkyLabs-win32-x64/SkyLabs.exe`. Read `RUNTIME.md`:
 **OpenFOAM, MPI and optional GPU runtimes are installed separately.** No user
 projects, CAD accounts or API keys are bundled. This build is unsigned.
 

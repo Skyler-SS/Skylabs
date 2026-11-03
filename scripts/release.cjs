@@ -10,15 +10,15 @@ async function sourceArchive(row,directory){
 async function main(){
  if(process.platform!=='win32')throw Error('Release packaging currently requires Windows.');
  if(!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(manifest.version))throw Error('Invalid release version');
- const releases=path.join(root,'outputs/releases'),stage=path.join(releases,'v'+manifest.version),app=path.join(stage,'AeroDesk-win32-x64');
- await fs.access(path.join(app,'AeroDesk.exe'));const thirdParty=path.join(stage,'Third-party-source');await fs.mkdir(thirdParty,{recursive:true});
+ const releases=path.join(root,'outputs/releases'),stage=path.join(releases,'v'+manifest.version),app=path.join(stage,'SkyLabs-win32-x64');
+ await fs.access(path.join(app,'SkyLabs.exe'));const thirdParty=path.join(stage,'Third-party-source');await fs.mkdir(thirdParty,{recursive:true});
  for(const row of sources){console.log('Checking corresponding source: '+row.file);await sourceArchive(row,thirdParty);}
  await fs.copyFile(path.join(root,'docs/THIRD_PARTY_SOURCE.md'),path.join(thirdParty,'README.md'));
  await fs.copyFile(path.join(root,'docs/RUNTIME.md'),path.join(stage,'RUNTIME.md'));
- await fs.copyFile(path.join(root,'work/aerodesk/src/manual.html'),path.join(stage,'AeroDesk-user-manual.html'));
+ await fs.copyFile(path.join(root,'work/aerodesk/src/manual.html'),path.join(stage,'SkyLabs-user-manual.html'));
  await fs.copyFile(path.join(root,'LICENSE'),path.join(stage,'LICENSE'));
- await fs.writeFile(path.join(stage,'START-HERE.txt'),'AeroDesk '+manifest.version+' for Windows x64\r\n\r\nOpen AeroDesk-win32-x64\\AeroDesk.exe.\r\nThe app is unsigned. OpenFOAM and GPU runtimes are not included.\r\nRead RUNTIME.md to configure a compatible solver. Import/viewing work without it.\r\nThe ? button opens the manual. Keep Third-party-source with redistributed copies.\r\n');
- const zip=path.join(releases,'AeroDesk-'+manifest.version+'-win32-x64.zip');
+ await fs.writeFile(path.join(stage,'START-HERE.txt'),'SkyLabs '+manifest.version+' for Windows x64\r\n\r\nOpen SkyLabs-win32-x64\\SkyLabs.exe.\r\nThe app is unsigned. OpenFOAM and GPU runtimes are not included.\r\nRead RUNTIME.md to configure a compatible solver. Import/viewing work without it.\r\nThe ? button opens the manual. Keep Third-party-source with redistributed copies.\r\n');
+ const zip=path.join(releases,'SkyLabs-'+manifest.version+'-win32-x64.zip');
  // Both paths are derived only from this repository and the validated version.
  await fs.rm(zip,{force:true});
  execFileSync('powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-Command','Add-Type -AssemblyName System.IO.Compression.FileSystem; [IO.Compression.ZipFile]::CreateFromDirectory($env:AERODESK_ZIP_SOURCE, $env:AERODESK_ZIP_DESTINATION)'],{windowsHide:true,env:{...process.env,AERODESK_ZIP_SOURCE:stage,AERODESK_ZIP_DESTINATION:zip},stdio:'inherit'});

@@ -24,10 +24,10 @@ Use compatible build tools as documented by that upstream revision.
 The JavaScript loader is renamed from `occt-import-js.js` to
 `occt-import-js.cjs`; no upstream library logic is changed. For a source build,
 replace the importer's files in `node_modules/occt-import-js/dist` and rebuild
-AeroDesk, or adjust `build.cjs` to copy your modified library output.
+SkyLabs, or adjust `build.cjs` to copy your modified library output.
 
 In the portable app, the loader and WASM are outside the ASAR archive under
-`AeroDesk-win32-x64/resources/app.asar.unpacked/vendor/`. Replace
+`SkyLabs-win32-x64/resources/app.asar.unpacked/vendor/`. Replace
 `occt-import-js.cjs` and `occt-import-js.wasm` there with compatible modified
 versions, preserving the filenames and API. Reverse engineering needed to debug
 modifications to these libraries is permitted. Keep notices and corresponding

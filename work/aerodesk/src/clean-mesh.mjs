@@ -136,8 +136,8 @@ export function cleanMesh(input,options={}){
   return {vertices,report};
 }
 export function asciiSTL(vertices,scale=1){
-  if(!Number.isFinite(scale)||scale<=0)throw Error('Choose a positive model size before export.');const lines=['solid AeroDesk_cleaned_meters'];
+  if(!Number.isFinite(scale)||scale<=0)throw Error('Choose a positive model size before export.');const lines=['solid SkyLabs_cleaned_meters'];
   for(let i=0;i<vertices.length;i+=9){const a=Array.from(vertices.slice(i,i+3)),b=Array.from(vertices.slice(i+3,i+6)),c=Array.from(vertices.slice(i+6,i+9)),n=cross(sub(b,a),sub(c,a)),m=Math.hypot(...n);lines.push('facet normal '+n.map(v=>m?(v/m).toPrecision(9):'0').join(' '),'outer loop');for(const p of [a,b,c])lines.push('vertex '+p.map(v=>(v*scale).toPrecision(9)).join(' '));lines.push('endloop','endfacet');}
-  lines.push('endsolid AeroDesk_cleaned_meters');return lines.join('\n');
+  lines.push('endsolid SkyLabs_cleaned_meters');return lines.join('\n');
 }
 

@@ -49,7 +49,8 @@ async function browse(keys,input={},fetcher=fetch){
  }
  const data=JSON.parse((await request(origin+'/api/v16'+route,keys,fetcher)).toString());
  const list=Array.isArray(data)?data:data.items;if(!Array.isArray(list))throw Error('Onshape returned an unexpected document list.');
- const items=kind==='parts'?list.filter(x=>typeof x.partId==='string'&&x.partId.length<=256&&(!x.bodyType||x.bodyType==='solid'||x.bodyType==='SOLID')).map(x=>({id:x.partId,name:String(x.name||'Part').slice(0,250)})):list.filter(x=>validId(x.id)&&(kind!=='elements'||x.elementType==='PARTSTUDIO')).map(x=>({id:x.id,name:String(x.name||'Untitled').slice(0,250),...(kind==='elements'?{link:origin+'/documents/'+input.document+'/w/'+input.workspace+'/e/'+x.id}:{})}));
+ const ELEMENT_KINDS={PARTSTUDIO:'partstudio',ASSEMBLY:'assembly'};
+ const items=kind==='parts'?list.filter(x=>typeof x.partId==='string'&&x.partId.length<=256&&(!x.bodyType||x.bodyType==='solid'||x.bodyType==='SOLID')).map(x=>({id:x.partId,name:String(x.name||'Part').slice(0,250)})):list.filter(x=>validId(x.id)&&(kind!=='elements'||ELEMENT_KINDS[x.elementType])).map(x=>({id:x.id,name:String(x.name||'Untitled').slice(0,250),...(kind==='elements'?{kind:ELEMENT_KINDS[x.elementType],link:origin+'/documents/'+input.document+'/w/'+input.workspace+'/e/'+x.id}:{})}));
  return {items,more:kind==='documents'&&!!data.next,origin};
 }
 function materialValue(value){
@@ -73,5 +74,37 @@ async function assignedMaterial(keys,link,fetcher=fetch){
  const same=assigned.length===items.length&&assigned.every(m=>m.name===assigned[0].name&&Math.abs(m.density-assigned[0].density)<1e-6);
  return {material:same?assigned[0]:null,parts:items.length,assigned:assigned.length,message:same?'Assigned Onshape material · '+items.length+' part(s)':'Parts use different or missing materials. A single density cannot represent this assembly; enter measured CG and flying mass.'};
 }
-module.exports={trustedUrl,parseLink,sign,request,browse,materialValue,assignedMaterial};
+
+// --- Assemblies ------------------------------------------------------------------
+// Assembly tabs expose their solved pose through occurrence transforms, so an
+// assembly is imported as its individual parts plus those transforms rather than as
+// one flattened export. Mate features come along in the same request.
+function parseAssemblyLink(value){
+  const u=trustedUrl(value),m=u.pathname.match(/^\/documents\/([a-f0-9]{24})\/([wvm])\/([a-f0-9]{24})\/e\/([a-f0-9]{24})\/?$/i);
+  if(!m)throw Error('Open your Assembly tab in Onshape and paste its full address, including /e/ and the tab ID.');
+  const query=new URLSearchParams({includeMateFeatures:'true',includeMateConnectors:'true',includeNonSolids:'false'});
+  if(u.searchParams.has('configuration'))query.set('configuration',u.searchParams.get('configuration'));
+  const route='/assemblies/d/'+m[1]+'/'+m[2]+'/'+m[3]+'/e/'+m[4];
+  return {origin:u.origin,url:u.origin+'/api/v16'+route+'?'+query,document:m[1],wvm:m[2],wvmid:m[3],element:m[4],workspace:m[2]==='w',link:u.href};
+}
+// A part is addressed by the microversion its instance reports, so parts that live in
+// linked documents resolve the same way as parts in this one.
+function partStlUrl(origin,instance){
+  const id=v=>typeof v==='string'&&/^[a-f0-9]{24}$/i.test(v);
+  if(!id(instance.documentId)||!id(instance.elementId))throw Error('An assembly instance is missing its document or tab.');
+  if(!id(instance.documentMicroversion))throw Error('An assembly instance is missing its microversion.');
+  if(typeof instance.partId!=='string'||!instance.partId||instance.partId.length>256||/[ -]/.test(instance.partId))throw Error('An assembly instance has an unusable part id.');
+  const query=new URLSearchParams({mode:'binary',units:'meter',chordTolerance:'0.0001',angleTolerance:'0.15'});
+  if(instance.configuration)query.set('configuration',String(instance.configuration).slice(0,2000));
+  return trustedUrl(origin+'/api/v16/parts/d/'+instance.documentId+'/m/'+instance.documentMicroversion+
+    '/e/'+instance.elementId+'/partid/'+encodeURIComponent(instance.partId)+'/stl?'+query).href;
+}
+async function assemblyDefinition(keys,link,fetcher=fetch){
+  const target=parseAssemblyLink(link);
+  if(target.origin!==keys.origin)throw Error('This document uses a different Onshape server. Reconnect using a key from '+target.origin+'.');
+  const body=(await request(target.url,keys,fetcher)).toString();
+  let data;try{data=JSON.parse(body);}catch{throw Error('Onshape returned an unreadable assembly definition.');}
+  return {definition:data,target};
+}
+module.exports={trustedUrl,parseLink,parseAssemblyLink,partStlUrl,assemblyDefinition,sign,request,browse,materialValue,assignedMaterial};
 

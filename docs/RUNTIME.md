@@ -2,7 +2,7 @@
 
 ## Windows application
 
-Extract the complete release ZIP and run `AeroDesk-win32-x64/AeroDesk.exe`.
+Extract the complete release ZIP and run `SkyLabs-win32-x64/SkyLabs.exe`.
 The application imports CAD and displays saved results without OpenFOAM. Connect
 your own Onshape credentials or optional AI key through the app. Projects do not
 carry account credentials.
@@ -27,7 +27,7 @@ For example, with your real paths in PowerShell:
 
 ```powershell
 $env:AERODESK_OPENFOAM_ROOT = 'D:\CFD\OpenFOAM-v2512'
-& 'D:\Apps\AeroDesk\AeroDesk-win32-x64\AeroDesk.exe'
+& 'D:\Apps\SkyLabs\SkyLabs-win32-x64\SkyLabs.exe'
 ```
 
 For a source checkout, set the same variable and run `npm start`. The launcher also

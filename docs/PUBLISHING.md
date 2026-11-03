@@ -1,4 +1,4 @@
-# Publish AeroDesk
+# Publish SkyLabs
 
 ## Push the prepared source
 
@@ -12,7 +12,7 @@ Create an empty repository on your Git hosting service, then use its actual URL:
 ```powershell
 git switch main
 npm run check:repo
-git remote add origin https://github.com/YOUR-ACCOUNT/AeroDesk.git
+git remote add origin https://github.com/YOUR-ACCOUNT/SkyLabs.git
 git push -u origin main
 ```
 
@@ -33,7 +33,7 @@ npm test
 npm run dist
 ```
 
-Share the complete `outputs/releases/AeroDesk-0.14.0-win32-x64.zip`, including the
+Share the complete `outputs/releases/SkyLabs-0.14.0-win32-x64.zip`, including the
 corresponding source inside it. `SHA256SUMS.txt` records the archive checksum.
 Internet access is needed for dependencies and the pinned upstream source archives.
 OpenFOAM and GPU runtimes are installed separately; include that limitation in

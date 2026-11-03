@@ -46,3 +46,95 @@ header{height:60px;padding:0 20px}.workspace{height:calc(100vh - 60px);min-heigh
 .wrap-controls .small{margin:4px 0 0;line-height:1.5}
 #sealCustom{display:block;margin-top:7px}
 #sealScale{color:#4a6b5d;font-variant-numeric:tabular-nums}
+
+/* ---- SkyLabs definition lines ------------------------------------------------
+   Appended last, which is how this file resolves conflicts. Structural edges -
+   the three workspace panels, cards, dialogs and the viewer - take a near-black
+   line so the layout reads as assembled panels rather than tinted areas. Dense
+   rows (metrics, facts, table bodies, sidebar step dividers) keep the light
+   hairline: black on every border reads as heavy, not defined. */
+:root{
+ --ink:#0d1620;             /* structural edges */
+ --line-strong:#33475a;     /* controls and inputs */
+ --line:#e2e8ee;            /* interior hairlines, unchanged in weight */
+ --accent:#127fb0;
+}
+
+/* Panel boundaries */
+header{border-bottom:1px solid var(--ink)}
+.setup{border-right:1px solid var(--ink)}
+.results{border-left:1px solid var(--ink)}
+.viewer-wrap{border:1px solid var(--ink);box-shadow:none}
+.history,.study-notes{border:1px solid var(--ink)}
+
+/* Cards and floating surfaces over the viewer */
+.model-card,.legend,.field-settings,.view-nav,.probe,.center-label,
+.view-toolbar>div,dialog .connection-state{border:1px solid var(--ink)}
+.toast{border:1px solid var(--ink)}
+dialog{border:1px solid var(--ink)}
+
+/* Controls: defined, a step lighter than the structure so a dense form of them
+   does not turn into a grid. */
+button,input,select{border-color:var(--line-strong)}
+button:hover{border-color:var(--ink)}
+.quiet{border-color:#b9c6d2}
+.primary{background:var(--accent);border-color:var(--ink);color:#fff}
+.primary:hover{background:#08648f;border-color:var(--ink)}
+.onshape{border-color:var(--ink)}
+.step{border-color:var(--line-strong);color:#53697c}
+
+/* Table outlines get a frame; the rows inside stay hairline. */
+.analysis-panel table{border:1px solid var(--ink)}
+.analysis-panel th{border-bottom:1px solid var(--ink)}
+.analysis-panel th,.analysis-panel td{border-bottom:1px solid var(--line)}
+
+/* The header mark is the app icon itself, so the taskbar, title bar and header
+   all carry one identical badge. */
+.brand-mark{width:34px;height:34px;border-radius:9px;display:block}
+.brand{letter-spacing:-.6px}
+
+/* Keep the Stage 1 repair controls in the same language as the rest. */
+.wrap-controls{border:1px solid var(--line-strong);background:#f4f8fb}
+#sealScale{color:#45637a}
+
+/* ---- Assembly joints dialog --------------------------------------------------- */
+.assembly-dialog{width:min(1000px,94vw)}
+.assembly-body{display:grid;grid-template-columns:minmax(300px,1fr) minmax(320px,1fr);gap:16px;margin:16px 0}
+.assembly-preview{display:flex;flex-direction:column;gap:6px}
+.assembly-preview canvas{width:100%;height:330px;display:block;border:1px solid var(--ink);
+ border-radius:9px;background:#0f1c27;cursor:grab;touch-action:none}
+.assembly-preview canvas:active{cursor:grabbing}
+#assemblyStats{margin:0;font-variant-numeric:tabular-nums}
+.assembly-lists{max-height:370px;overflow:auto;padding-right:4px;display:flex;flex-direction:column;gap:14px}
+.assembly-section{border:1px solid var(--line-strong);border-radius:8px;padding:11px;background:#fbfcfd}
+.assembly-section>.panel-title{margin-bottom:8px}
+.assembly-section>.panel-title button{font-size:10px;padding:5px 8px}
+
+.joint-row{border-top:1px solid var(--line);padding:9px 0}
+.joint-row:first-child{border-top:0}
+.joint-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.joint-head b{font-size:12px}
+.joint-head span{font-size:9px;color:var(--muted)}
+.joint-dof{margin-top:7px}
+.joint-dof label{font-size:9px;margin:0 0 4px;color:#6a7c8c}
+.joint-controls{display:flex;align-items:center;gap:8px}
+.joint-controls input[type=range]{flex:1;margin:0;padding:0;border:0;height:18px;accent-color:var(--accent)}
+.joint-number{width:82px;margin:0;padding:6px 7px;font-size:11px;font-variant-numeric:tabular-nums}
+.joint-actions{display:flex;gap:6px;margin-top:7px}
+.joint-actions button{font-size:9px;padding:5px 8px}
+
+.part-row{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:400;
+ margin:0;padding:4px 0;border-top:1px solid var(--line);color:#44596b}
+.part-row:first-child{border-top:0}
+.part-row input[type=checkbox]{width:auto;margin:0;display:inline;accent-color:var(--accent)}
+.part-row span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.config-row{display:flex;align-items:center;gap:6px;padding:5px 0;border-top:1px solid var(--line);font-size:11px}
+.config-row:first-child{border-top:0}
+.config-row span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.config-row button{font-size:9px;padding:4px 7px}
+#configName{margin:0;font-size:11px}
+.assembly-dialog .browse-actions{display:flex;gap:6px;align-items:center}
+
+.assembly-caveat{border-left:3px solid var(--ink);padding-left:10px;margin:0 0 4px}
+@media(max-width:900px){.assembly-body{grid-template-columns:1fr}.assembly-lists{max-height:none}}

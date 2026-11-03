@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('desktop',{
   onshapeConnect:values=>ipcRenderer.invoke('onshape-connect',values),
   onshapeDisconnect:()=>ipcRenderer.invoke('onshape-disconnect'),
   onshapeImport:link=>ipcRenderer.invoke('onshape-import',link),
+  onshapeAssembly:link=>ipcRenderer.invoke('onshape-assembly',link),
+  onAssemblyProgress:fn=>ipcRenderer.on('assembly-progress',(_e,d)=>fn(d)),
   onshapeHelp:()=>ipcRenderer.invoke('onshape-help')
 });
 
