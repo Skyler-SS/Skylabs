@@ -98,6 +98,23 @@ function enumValue(featureData,id){
  return p&&typeof p.value==='string'?p.value:'';
 }
 
+// Two endpoints describe the same mate differently, and both are accepted here.
+//
+// The Assembly DEFINITION endpoint - the one this app calls - returns a simplified
+// featureData carrying `mateType` as a plain string field:
+//   featureData: {name:'Fastened 1', mateType:'FASTENED', matedEntities:[...]}
+//
+// The Assembly FEATURES endpoint instead returns a BTMFeature whose mateType is an
+// enum parameter that has to be found by parameterId.
+//
+// Reading only the parameters array - which an earlier version of this file did -
+// finds no mates at all against the definition endpoint, because featureData has no
+// `parameters` property.
+function mateTypeOf(featureData){
+ if(typeof featureData.mateType==='string'&&featureData.mateType)return featureData.mateType;
+ return enumValue(featureData,'mateType');
+}
+
 // Limits arrive as expressions such as "30 deg" or "0.5 in". Anything that does not
 // parse cleanly is treated as "no limit" rather than guessed at.
 const LENGTH_TO_MM={m:1000,meter:1000,metre:1000,mm:1,millimeter:1,millimetre:1,cm:10,centimeter:10,in:25.4,inch:25.4,ft:304.8};
@@ -114,7 +131,11 @@ export function parseQuantity(expression,kind){
  return factor===undefined?null:value*factor;
 }
 
+// Mate limits only come back from the Assembly Features endpoint. The definition
+// endpoint omits them, in which case the joint is simply unlimited and the dialog
+// falls back to a sensible slider range.
 function limitsFor(featureData,type){
+ if(!Array.isArray(featureData.parameters))return {};
  const enabled=parameter(featureData,'mateLimitsEnabled');
  if(enabled&&enabled.value===false)return {};
  const read=(id,kind)=>{
@@ -140,7 +161,7 @@ function limitsFor(featureData,type){
 // primary axis is its Z axis, which is the rotation axis of a revolute mate and the
 // slide direction of a slider.
 function matedFrame(entity){
- const cs=entity&&entity.matedCS;
+ const cs=entity&&(entity.matedCS||entity.mateConnectorCS);
  if(!cs||!Array.isArray(cs.origin)||!Array.isArray(cs.zAxis))return null;
  const origin=cs.origin.map(Number),axis=cs.zAxis.map(Number);
  if(origin.length!==3||axis.length!==3)return null;
@@ -230,7 +251,7 @@ export function readAssembly(definition){
 
  for(const {prefix,names,feature} of features){
   const d=feature&&feature.featureData;if(!d)continue;
-  const type=MATE_TYPES[enumValue(d,'mateType').toUpperCase()];
+  const type=MATE_TYPES[mateTypeOf(d).toUpperCase()];
   if(!type)continue;
   // A mate inside a sub-assembly names occurrences relative to that sub-assembly, so
   // its paths are prefixed by the path at which this copy of it is placed. Root

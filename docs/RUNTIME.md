@@ -30,17 +30,41 @@ $env:AERODESK_OPENFOAM_ROOT = 'D:\CFD\OpenFOAM-v2512'
 & 'D:\Apps\SkyLabs\SkyLabs-win32-x64\SkyLabs.exe'
 ```
 
+Either the distribution root (as above) or the build root inside it
+(`…\msys64\home\ofuser\OpenFOAM\OpenFOAM-v2512`) works — the app descends into the
+nested layout when the root it is given has no `platforms` directory. The platform
+build directory is discovered by looking, so `win64MingwDPInt32Opt` is not assumed.
+
 For a source checkout, set the same variable and run `npm start`. The launcher also
 recognizes the original `OpenFOAM-runtime/msys64/home/ofuser/OpenFOAM/OpenFOAM-v2512`
 layout beside local version folders. The environment variable avoids relying on
 that folder arrangement.
 
-Automatic CPU worker selection requires Microsoft MPI and matching parallel
-OpenFOAM binaries in the runtime's
-`platforms/win64MingwDPInt32Opt/aerodesk-mpi` directory. Serial solving does not
-require MPI. The repository does not include these custom binaries or install them.
-Check the app's solver status before submitting a run. If no compatible runtime is
-present, the app cannot run RANS merely by installing the desktop ZIP.
+## Multi-core solving
+
+Multi-core needs two things, and official OpenFOAM.com Windows builds already supply
+the second:
+
+1. **Microsoft MPI** (`mpiexec.exe`). Found via `MSMPI_BIN`, then Program Files, then
+   `PATH`.
+2. **An MPI-linked OpenFOAM build.** Official builds ship `libPstream.dll` alongside
+   `libPstream.dll-dummy` and `libPstream.dll-msmpi`, and activate one by copying it
+   over `libPstream.dll`. When the live file matches the `-msmpi` variant, the ordinary
+   `bin/simpleFoam.exe` runs in parallel under `mpiexec` — the same binary used
+   serially. No separate parallel build is required.
+
+Earlier versions of this app looked for custom binaries in a
+`platforms/win64MingwDPInt32Opt/aerodesk-mpi` directory. **That requirement was a
+mistake**: no official distribution has such a folder, so working multi-core hardware
+was reported as unavailable. The app now detects capability from the standard `bin`.
+
+If the live `libPstream.dll` matches the `-dummy` variant instead, the build is serial
+only; copy the `-msmpi` variant over it to switch. Serial solving never needs MPI.
+
+The worker picker offers up to half the machine's logical cores, and keeps at least
+50,000 cells per worker so decomposition overhead does not dominate. Counts the
+installed runtime cannot deliver are disabled with the reason shown, before a run
+starts rather than after meshing.
 
 ## Optional GPU pressure solver
 

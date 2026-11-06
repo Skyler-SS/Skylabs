@@ -379,3 +379,63 @@ test('a sub-assembly Onshape did not return is skipped, not fatal', () => {
  // ...and only the root mates survive, without throwing.
  assert.deepEqual(a.joints.map(j=>j.id).sort(),['bolted','hinge']);
 });
+
+test('mates from the Assembly Definition endpoint are read, not only the Features shape', () => {
+ // The shape the app actually receives. featureData carries mateType as a plain
+ // string and has no `parameters` array at all; reading only parameters finds zero
+ // mates, which is what made a real assembly look like it had none.
+ const d={rootAssembly:{
+  instances:[
+   {id:'MzbHnGVkP',name:'Base',type:'Part',partId:'P1',documentId:'D',documentMicroversion:'M',elementId:'E'},
+   {id:'JHDkwpQ2x',name:'Lever',type:'Part',partId:'P2',documentId:'D',documentMicroversion:'M',elementId:'E'},
+  ],
+  occurrences:[
+   {path:['MzbHnGVkP'],transform:IDENTITY.slice()},
+   {path:['JHDkwpQ2x'],transform:translate(2,0,0)},
+  ],
+  features:[
+   {featureType:'mate',id:'Mg6dQzTsYlypZLwXE',suppressed:false,featureData:{
+    name:'Revolute 1',
+    mateType:'REVOLUTE',
+    matedEntities:[
+     // matedCS is relative to its own occurrence. The lever sits at x=2, so an
+     // origin of -1 puts the hinge at x=1; the base is at the origin, so its side
+     // names the same physical point with +1. A real mate always agrees like this.
+     {matedOccurrence:['JHDkwpQ2x'],
+      matedCS:{origin:[-1,0,0],xAxis:[1,0,0],yAxis:[0,1,0],zAxis:[0,0,1]}},
+     {matedOccurrence:['MzbHnGVkP'],
+      matedCS:{origin:[1,0,0],xAxis:[1,0,0],yAxis:[0,1,0],zAxis:[0,0,1]}},
+    ]}},
+   {featureType:'mate',id:'Fst1',suppressed:false,featureData:{
+    name:'Fastened 1',mateType:'FASTENED',
+    matedEntities:[
+     {matedOccurrence:['MzbHnGVkP'],matedCS:{origin:[0,0,0],xAxis:[1,0,0],yAxis:[0,1,0],zAxis:[0,0,1]}},
+     // The second side can be unoccurred - mated to the assembly origin itself.
+     {matedOccurrence:[],matedCS:{origin:[0,0,0],xAxis:[1,0,0],yAxis:[0,1,0],zAxis:[0,0,1]}},
+    ]}},
+   // A mate connector is not a mate and must not become a joint.
+   {featureType:'mateConnector',id:'MC1',featureData:{
+    name:'Mate connector 1',
+    mateConnectorCS:{origin:[0,0,0],xAxis:[1,0,0],yAxis:[0,1,0],zAxis:[0,0,1]}}},
+  ],
+ }};
+
+ const a=readAssembly(d);
+ assert.equal(a.joints.length,2,'both mates are read; the mate connector is not one');
+
+ const rev=a.joints.find(j=>j.type==='revolute');
+ assert.ok(rev,'a REVOLUTE mate must be found from featureData.mateType');
+ assert.equal(rev.name,'Revolute 1');
+ assert.equal(rev.drivable,true);
+ assert.equal(rev.resolved,true);
+ // No parameters array means no limits reported, which must not throw.
+ assert.deepEqual(rev.limits,{});
+
+ // An unoccurred side resolves against the assembly origin rather than failing.
+ assert.equal(a.joints.find(j=>j.type==='fastened').resolved,true);
+
+ // And it actually drives: the lever swings about (1,0,0).
+ const posed=poseMatrices(a,{[rev.id]:{angle:90}});
+ closeVec(transformPoint(posed.get('JHDkwpQ2x'),[0,0,0]),[1,1,0],1e-12);
+ closeVec(transformPoint(posed.get('MzbHnGVkP'),[0,0,0]),[0,0,0],1e-12);
+});

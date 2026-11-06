@@ -90,7 +90,10 @@ function updateEnvironment(){
  }
 }
 function settings(){const s={fluidMedium:$('fluidMedium').value,groundMode:$('groundMode').value,groundClearance:+$('groundClearance').value,length:+$('length').value,speed:+$('speed').value,yaw:+$('yaw').value,pitch:+$('pitch').value,roll:+$('roll').value,re:+$('re').value,nx:+$('quality').value,steps:+$('steps').value,density:+$('density').value,engine:$('engine').value,qualityMode:$('ransQuality').value,cpuWorkers:$('cpuWorkers').value,computeBackend:$('computeBackend').value,nu:+$('nu').value,roughness:+$('roughness').value/1000,referenceArea:+$('referenceArea').value,referenceAreaKind:state.referenceAreaKind||'entered',turbulenceRatio:+$('turbulenceRatio').value,intensity:+$('intensity').value};validateSettings(s);if(s.engine==='openfoam'){if(!$('ransRe').validity.valid)throw Error($('ransRe').validationMessage||'Enter a valid Reynolds number.');s.reynolds=reynoldsNumber(s);}return s;}
-function validateSettings(s){qualityMode(s);environment(s);if(s.computeBackend!==undefined&&!['cpu','gpu'].includes(s.computeBackend))throw Error('Invalid compute backend.');if(s.cpuWorkers!==undefined&&!['auto','1','2','4','8'].includes(String(s.cpuWorkers)))throw Error('Invalid CPU worker setting.');if(s.turbulenceRatio!==undefined&&(!Number.isFinite(s.turbulenceRatio)||s.turbulenceRatio<.001||s.turbulenceRatio>10000))throw Error('Turbulent viscosity ratio must be 0.001–10000.');if(s.roughness!==undefined&&(!Number.isFinite(s.roughness)||s.roughness<0||s.roughness>Math.min(.1,s.length*.01)))throw Error('Roughness must be 0–100 mm and no more than 1% of model length.');for(const key of ['pitch','roll'])if(s[key]!==undefined&&(!Number.isFinite(s[key])||Math.abs(s[key])>180))throw Error('Rotation must be between -180 and 180 degrees.');for(const [key,min,max] of [['length',.001,1000],['speed',.001,100],['yaw',-180,180],['re',10,60],['density',.01,2000]])if(!Number.isFinite(s[key])||s[key]<min||s[key]>max)throw Error(key+' must be between '+min+' and '+max+'.');if(![64,96].includes(s.nx)||![800,1600,3200].includes(s.steps))throw Error('Invalid preview settings.');if(s.engine==='openfoam')for(const [key,min,max] of [['speed',.1,100],['nu',1e-8,.1],['referenceArea',1e-8,1e8],['intensity',.00001,.2]])if(!Number.isFinite(s[key])||s[key]<min||s[key]>max)throw Error(key+' must be between '+min+' and '+max+'.');if(s.engine&&!['openfoam','preview'].includes(s.engine))throw Error('Unknown solver.');}
+// Must stay in step with WORKER_CHOICES in compute.cjs and the #cpuWorkers options
+// in index.html; tests/compute.test.mjs asserts all three agree.
+const WORKER_CHOICES=['auto','1','2','4','8','12','16','24','32'];
+function validateSettings(s){qualityMode(s);environment(s);if(s.computeBackend!==undefined&&!['cpu','gpu'].includes(s.computeBackend))throw Error('Invalid compute backend.');if(s.cpuWorkers!==undefined&&!WORKER_CHOICES.includes(String(s.cpuWorkers)))throw Error('Invalid CPU worker setting.');if(s.turbulenceRatio!==undefined&&(!Number.isFinite(s.turbulenceRatio)||s.turbulenceRatio<.001||s.turbulenceRatio>10000))throw Error('Turbulent viscosity ratio must be 0.001–10000.');if(s.roughness!==undefined&&(!Number.isFinite(s.roughness)||s.roughness<0||s.roughness>Math.min(.1,s.length*.01)))throw Error('Roughness must be 0–100 mm and no more than 1% of model length.');for(const key of ['pitch','roll'])if(s[key]!==undefined&&(!Number.isFinite(s[key])||Math.abs(s[key])>180))throw Error('Rotation must be between -180 and 180 degrees.');for(const [key,min,max] of [['length',.001,1000],['speed',.001,100],['yaw',-180,180],['re',10,60],['density',.01,2000]])if(!Number.isFinite(s[key])||s[key]<min||s[key]>max)throw Error(key+' must be between '+min+' and '+max+'.');if(![64,96].includes(s.nx)||![800,1600,3200].includes(s.steps))throw Error('Invalid preview settings.');if(s.engine==='openfoam')for(const [key,min,max] of [['speed',.1,100],['nu',1e-8,.1],['referenceArea',1e-8,1e8],['intensity',.00001,.2]])if(!Number.isFinite(s[key])||s[key]<min||s[key]>max)throw Error(key+' must be between '+min+' and '+max+'.');if(s.engine&&!['openfoam','preview'].includes(s.engine))throw Error('Unknown solver.');}
 function applySettings(s){validateSettings(s);$('fluidMedium').value=s.fluidMedium||'air';$('groundMode').value=s.groundMode||'none';$('groundClearance').value=s.groundClearance??.1;$('ransQuality').value=qualityMode(s);$('computeBackend').value=s.computeBackend||'cpu';$('cpuWorkers').value=s.cpuWorkers??'auto';state.referenceAreaKind=s.referenceAreaKind||'entered';$('turbulenceRatio').value=s.turbulenceRatio??10;updateAreaBasis();$('roughness').value=(s.roughness||0)*1000;$('pitch').value=s.pitch||0;$('roll').value=s.roll||0;for(const k of ['length','speed','yaw','re','steps','density'])$(k).value=s[k];$('quality').value=s.nx;$('engine').value=s.engine||'preview';for(const k of ['nu','referenceArea','intensity','turbulenceRatio'])if(s[k]!==undefined)$(k).value=s[k];syncReynoldsInput();}
 function updateFacts(){updateEnvironment();$('reLabel').textContent=state.result||ransRunning||state.worker?'Reynolds number used':'Reynolds number · setup';try{const s=(state.result||ransRunning||state.worker)&&state.settings?state.settings:settings(),rans=s.engine==='openfoam';if(rans)$('ransRe').value=scientificReynolds(reynoldsNumber(s));$('viscosity').textContent=(rans?s.nu:s.speed*s.length/s.re).toExponential(2)+' m²/s';$('reValue').textContent=scientificReynolds(rans?reynoldsNumber(s):s.re);$('reValue').title=rans?'Re = speed × longest dimension / kinematic viscosity = '+reynoldsNumber(s):'Laminar preview Reynolds number';$('ransSettings').classList.toggle('hidden',!rans);$('previewSettings').classList.toggle('hidden',rans);$('residualLabel').textContent=rans?'max initial · p/U/k/ω':'40-step L2';$('methodNote').firstChild.textContent=rans?environmentLabel(s)+' · steady SST.':'Low-Re preview · viscosity is scaled.';updatePlan();}catch{}}
 async function updatePlan(){const version=++planVersion;await new Promise(r=>setTimeout(r,180));if(version!==planVersion)return;try{if(!state.mesh||$('engine').value!=='openfoam')return;const p=await api.foamPlan({settings:settings(),vertices:state.mesh.geometry.attributes.position.array});if(version!==planVersion)return;const hours=p.estimatedSeconds/3600,time=hours<1?Math.max(1,Math.round(hours*60*.5))+'–'+Math.round(hours*60*2)+' min':(hours*.5).toFixed(1)+'–'+(hours*2).toFixed(1)+' hours';$('autoPlan').textContent=p.label+' · '+p.stages.length+' mesh'+(p.stages.length>1?'es':'')+' · about '+p.memoryGB.toFixed(1)+' GB RAM. Estimated '+time+'; varies with convergence. '+(settings().computeBackend==='gpu'?'GPU pressure + CPU. ':p.workers+' CPU workers. ')+p.warning;}catch(e){if(version===planVersion)$('autoPlan').textContent=errorText(e);}}
@@ -180,7 +183,7 @@ function sample(kind){let g;if(kind==='sphere')g=new T.SphereGeometry(.5,48,32);
 async function parseModel(file){if(file.parts?.length){const gs=await Promise.all(file.parts.map(p=>parseModel({name:p.name+".stl",bytes:p.bytes})));const merged=mergeGeometries(gs);merged.userData={parts:gs.map(g=>g.attributes.position.array.slice())};gs.forEach(g=>g.dispose());return merged;}if(/\.(step|stp|3mf)$/i.test(file.name)){const converted=await api.modelConvert({type:/\.3mf$/i.test(file.name)?'3mf':'step',bytes:file.bytes});const geometries=converted.parts.map(p=>{const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(p,3));g.rotateX(-Math.PI/2);return g;});const merged=mergeGeometries(geometries);merged.userData={meters:true,parts:geometries.map(g=>g.attributes.position.array.slice())};geometries.forEach(g=>g.dispose());return merged;}const bytes=new Uint8Array(file.bytes);if(/\.stl$/i.test(file.name))return new STLLoader().parse(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));if(/\.obj$/i.test(file.name)){const group=new OBJLoader().parse(new TextDecoder().decode(bytes));group.updateMatrixWorld(true);const geoms=[];group.traverse(o=>{if(o.isMesh){const g=(o.geometry.index?o.geometry.toNonIndexed():o.geometry.clone()).applyMatrix4(o.matrixWorld);for(const a of Object.keys(g.attributes))if(a!=='position')g.deleteAttribute(a);geoms.push(g);}});if(!geoms.length)throw Error('The OBJ has no triangle surfaces.');const merged=mergeGeometries(geoms);merged.userData={parts:geoms.map(g=>g.attributes.position.array.slice())};geoms.forEach(g=>g.dispose());return merged;}throw Error('Choose an STL, OBJ, STEP or 3MF file.');}
 async function importLocalModel(f){validateModelFile({name:f.name,size:f.bytes.byteLength});const g=await parseModel(f);let reduction=null;if(triangleCount(g.getAttribute('position')?.array||[])>DECIMATE_TARGET_TRIANGLES){$('status').textContent='Simplifying a large model…';reduction=reduceGeometry(g);}$('status').textContent='Cleaning and checking the model…';try{const cleaned=await prepareImport(g);installGeometry(g,f.name,null,g.userData?.meters?true:null,cleaned);}catch(e){$('status').textContent='Import failed. Your previous model is still available.';throw e;}finally{g.dispose();}document.querySelectorAll('[data-sample]').forEach(b=>b.classList.remove('selected'));toast((state.cleanup.ready?'Imported and checked '+f.name+(g.userData?.meters?'. CAD units converted to meters; source Z is upright.':'. Confirm size in meters.'):'Imported '+f.name+'. Some geometry still needs repair; see the cleanup summary.')+simplifiedNote(reduction));}
 async function openModel(){const f=await api.open('model');if(f){setBusy(true);$('stop').disabled=true;try{await importLocalModel(f);}finally{setBusy(false);}}}
-function setBusy(b){busy=b;document.querySelectorAll('.setup input,.setup select,.setup button').forEach(el=>el.disabled=b);$('openProject').disabled=b;$('newProject').disabled=b;for(const id of ['runStudies','autoStudies','addStudy','studyPitch','studyYaw','studyGrid','studyQuality','rerunStudies'])$(id).disabled=b;$('stopStudies').disabled=!state.studyRunning;$('stop').disabled=false;$('stop').classList.toggle('hidden',!b);$('run').classList.toggle('hidden',b);renderStudies();}
+function setBusy(b){busy=b;$('busyBar').classList.toggle('hidden',!b);document.querySelectorAll('.setup input,.setup select,.setup button').forEach(el=>el.disabled=b);$('openProject').disabled=b;$('newProject').disabled=b;for(const id of ['runStudies','autoStudies','addStudy','studyPitch','studyYaw','studyGrid','studyQuality','rerunStudies'])$(id).disabled=b;$('stopStudies').disabled=!state.studyRunning;$('stop').disabled=false;$('stop').classList.toggle('hidden',!b);$('run').classList.toggle('hidden',b);renderStudies();}
 function clearDropHint(){dragDepth=0;$('dropOverlay').classList.add('hidden');}
 async function importDroppedFiles(files){
   let started=false;
@@ -215,6 +218,19 @@ function startRun(overrideSteps){
   };
   w.postMessage({vertices:state.mesh.geometry.getAttribute('position').array.slice(),nx:s.nx,re:s.re,steps:overrideSteps||s.steps});
 }
+// The main process reports each part as it arrives. Without this subscription the
+// events were sent into the void and a large import looked like a hang.
+api.onAssemblyProgress(d=>{
+  if(d.phase==='structure'){assemblyProgress('Reading the assembly structure…',null);return;}
+  if(d.phase!=='parts')return;
+  const total=d.total||1;
+  assemblyProgress(d.done>=total
+      ?'Downloaded '+total+' part'+(total===1?'':'s')+'. Preparing geometry…'
+      :'Downloading parts · '+d.done+' of '+total+(d.name?' · '+d.name:''),
+    d.done/total);
+  $('status').textContent='Downloading the assembly from Onshape · '+d.done+' of '+total+'…';
+});
+
 api.foamProgress(d=>{if(d.plan)state.runPlan=d.plan;if(d.meshIndex!==undefined){state.meshProgress=d.meshIndex;state.meshCount=d.meshCount;state.meshWarning=null;}if(d.layerCoverage)state.meshWarning=d.warning;if(state.studyRunning){$('studyStatus').textContent=(state.studyProgressLabel||'Study')+' · '+d.stage+(d.iteration?' · iteration '+d.iteration:'');$('status').textContent=$('studyStatus').textContent;return;}if(state.sweeping){$('sweepStatus').textContent='Study '+state.sweepIndex+'/4 · '+d.stage+(d.iteration?' · iteration '+d.iteration:'');return;}if(!ransRunning)return;const stages={surfaceCheck:'Checking the model',surfaceFeatureExtract:'Finding sharp edges',blockMesh:'Building wind tunnel',snappyHexMesh:'Refining the mesh & wall layers',checkMesh:'Checking mesh quality',decomposePar:'Splitting mesh across CPU workers',reconstructPar:'Combining CPU results',simpleFoam:'Solving 3D RANS',postProcess:'Preparing the flow view'};state.elapsed=(performance.now()-state.started)/1000;$('elapsed').textContent=state.elapsed.toFixed(0)+' s';$('status').textContent=((state.meshCount||1)>1?'Mesh '+((state.meshProgress||0)+1)+' / '+state.meshCount+' · ':'')+(stages[d.stage]||d.stage)+(d.stage==='simpleFoam'?' · '+(state.settings?.computeBackend==='gpu'?'CUDA pressure solve':(d.workers||1)+' CPU workers'):'')+(d.iteration?' · iteration '+d.iteration:'')+(state.meshWarning?' · '+state.meshWarning:'');$('iteration').textContent=d.iteration?d.iteration+' iterations':'Meshing';if(d.residual!==undefined)$('change').textContent=d.residual.toExponential(2);const phase=d.stage==='simpleFoam'?.6:d.stage.startsWith('postProcess')?.9:['checkMesh','decomposePar'].includes(d.stage)?.35:.15;$('progress').style.width=100*((state.meshProgress||0)+phase)/(state.meshCount||1)+'%';});
 async function startRans(){
   if(busy)return;ensureClean();const s=settings();state.meshWarning=null;state.meshProgress=0;state.meshCount=qualityMode(s)==='reference'?3:1;invalidate();state.settings=s;state.started=performance.now();state.elapsed=0;ransRunning=true;setBusy(true);updateFacts();$('openCase').disabled=false;$('stateBadge').textContent='OpenFOAM running';$('stateBadge').classList.add('running');
@@ -271,7 +287,24 @@ function projectData(){if(!state.base)throw Error('Import a model before saving 
 // An Onshape Assembly tab is imported as its individual parts plus the solved
 // occurrence transforms. Driving a joint re-poses the affected subtree locally and
 // nothing is ever written back to Onshape. The geometry maths lives in joints.mjs.
-let assemblyState=null,assemblyPreview=null,previewPending=0;
+let assemblyState=null,assemblyPreview=null,previewPending=0,previewDragging=false;
+
+// Long synchronous loops lock the renderer, so the browser cannot paint, scroll or
+// react to a click until they finish - which is what made the app look frozen.
+// Handing the thread back with a macrotask (not a microtask: those run before the
+// next paint) lets the UI breathe between chunks.
+const breathe=()=>new Promise(r=>setTimeout(r,0));
+
+function assemblyProgress(text,fraction){
+  const box=$('assemblyProgress');
+  box.classList.remove('hidden');
+  $('assemblyProgressText').textContent=text;
+  $('assemblyBar').style.width=fraction==null?'100%':Math.round(fraction*100)+'%';
+}
+function clearAssemblyProgress(){
+  $('assemblyProgress').classList.add('hidden');
+  $('assemblyBar').style.width='0%';
+}
 
 function assemblyPoses(){
   return poseMatrices(assemblyState.assembly,assemblyState.values);
@@ -362,7 +395,11 @@ function updatePreview(){
   if(p){
     const g=new T.BufferGeometry();
     g.setAttribute('position',new T.Float32BufferAttribute(merged,3));
-    g.computeVertexNormals();g.computeBoundingSphere();
+    // Recomputing normals over a large assembly is the expensive part, so it is
+    // skipped while a slider is being dragged and done once on release. Shading is
+    // briefly flat-wrong mid-drag; the geometry shown is always correct.
+    if(!previewDragging)g.computeVertexNormals();
+    g.computeBoundingSphere();
     p.mesh.geometry.dispose();p.mesh.geometry=g;
     const sphere=g.boundingSphere;
     if(sphere&&sphere.radius>0){p.center.copy(sphere.center);p.fit=sphere.radius;}
@@ -443,8 +480,10 @@ function renderJoints(){
         if(from!==box)box.value=String(v);
         schedulePreview();
       };
-      slider.oninput=()=>commit(slider.value,slider);
-      box.onchange=()=>commit(box.value,box);
+      slider.oninput=()=>{previewDragging=true;commit(slider.value,slider);};
+      // Dragging ends on change; redraw once more with proper normals.
+      slider.onchange=()=>{previewDragging=false;commit(slider.value,slider);};
+      box.onchange=()=>{previewDragging=false;commit(box.value,box);};
       const controls=document.createElement('div');controls.className='joint-controls';
       controls.append(slider,box);
       wrap.append(label,controls);row.append(wrap);
@@ -518,14 +557,20 @@ function renderAssembly(){
 
 // Kept separate from the fetch so the QA harness can drive the whole dialog,
 // STL parsing included, without a live Onshape document.
-function installAssembly(data,name){
+async function installAssembly(data,name){
   const assembly=readAssembly(data.definition);
   const meshes=new Map();
-  for(const [source,bytes] of Object.entries(data.meshes)){
+  // Parsing a few dozen STLs in one synchronous loop locks the renderer for several
+  // seconds, so each one yields the thread and reports where it has got to.
+  const sources=Object.entries(data.meshes);
+  for(let i=0;i<sources.length;i++){
+    const [source,bytes]=sources[i];
     const u=new Uint8Array(bytes);
     const g=new STLLoader().parse(u.buffer.slice(u.byteOffset,u.byteOffset+u.byteLength));
     meshes.set(source,g.getAttribute('position').array.slice());
     g.dispose();
+    assemblyProgress('Preparing geometry · '+(i+1)+' of '+sources.length,(i+1)/sources.length);
+    await breathe();
   }
   const parts=leafParts(assembly).map(p=>({...p,include:!p.hidden}));
   assemblyState={link:data.link,workspace:data.workspace,assembly,parts,meshes,
@@ -537,15 +582,18 @@ function installAssembly(data,name){
 async function openAssemblyDialog(link){
   setBusy(true);$('stop').disabled=true;
   $('status').textContent='Downloading the assembly from Onshape…';
+  assemblyProgress('Reading the assembly structure…',null);
   try{
     const data=await api.onshapeAssembly(link);
     const studio=browseStudios.find(x=>x.link===link.split('?')[0]);
-    installAssembly(data,studio?studio.name:null);
+    await installAssembly(data,studio?studio.name:null);
+    clearAssemblyProgress();
     $('onshapeDialog').close();
     $('assemblyDialog').showModal();
     setTimeout(drawPreview,0);
     $('status').textContent='Assembly loaded. Drive its joints, then apply.';
-  }finally{setBusy(false);}
+  }catch(e){clearAssemblyProgress();throw e;}
+  finally{setBusy(false);}
 }
 
 async function applyAssemblyConfiguration(){
@@ -559,9 +607,11 @@ async function applyAssemblyConfiguration(){
   try{
     if(triangleCount(merged)>DECIMATE_TARGET_TRIANGLES){
       $('status').textContent='Simplifying a large assembly…';
+      await breathe();
       reduction=reduceGeometry(g);
     }
     $('status').textContent='Cleaning assembly geometry…';
+    await breathe();
     const driven=Object.entries(assemblyState.values)
       .filter(([,v])=>(v.angle||0)||(v.offset||0)).length;
     const label=assemblyState.name+(driven?' · '+driven+' joint(s) driven':'');
@@ -658,6 +708,56 @@ window.runCleanupSmokeTest=async()=>{
   const bad=projectData();bad.vertices=bad.vertices.slice(9);loadProject(bad);let blocked=false;try{startRun();}catch{blocked=true;}check('Open model blocks simulation',blocked&&!state.cleanup.ready&&!state.worker&&!ransRunning);check('Unresolved issues expanded',$('cleanupReport').open);
   const savedName=state.name;try{await importLocalModel({name:'broken.stl',bytes:new TextEncoder().encode('solid empty\nendsolid empty')});}catch{}check('Failed import preserves model',state.name===savedName);
   sample('sphere');check('Sample model stays valid',state.cleanup.ready);await new Promise(r=>setTimeout(r,300));return {ok:true,checks,repairReport:r};
+};
+
+// Run a real model file end to end: import, repair, then a full RANS solve at the
+// given settings. The fixture-based smoke test cannot catch problems that only appear
+// on real CAD - the wall-treatment divergence this was written for is exactly such a
+// case, since it depends on how many boundary layers snappyHexMesh can actually build.
+// The OpenFOAM result exposes `history` - one {iteration,cd,cy,cz} row per write -
+// and no scalar cd/cl. Averaging the tail is what makes an oscillating bluff-body
+// result reportable; a single final sample is noise.
+const tailLoads=history=>{
+  if(!Array.isArray(history)||!history.length)return {cd:null,cl:null,samples:0};
+  const tail=history.slice(-100);
+  const mean=key=>tail.reduce((sum,row)=>sum+row[key],0)/tail.length;
+  const spread=key=>{const m=mean(key);return Math.max(...tail.map(r=>Math.abs(r[key]-m)));};
+  return {cd:mean('cd'),cl:mean('cz'),cdSpread:spread('cd'),
+    samples:history.length,tailSamples:tail.length};
+};
+
+window.runRansFileTest=async(file,options={})=>{
+  const out={name:file.name};
+  setBusy(true);
+  try{await importLocalModel({...file,bytes:new Uint8Array(file.bytes)});}
+  finally{setBusy(false);}
+  out.cleanup={ready:state.cleanup?.ready,components:state.cleanup?.components,
+    boundaryEdges:state.cleanup?.boundaryEdges,nonManifoldEdges:state.cleanup?.nonManifoldEdges,
+    outputFaces:state.cleanup?.outputFaces};
+  if(!state.cleanup?.ready){out.ok=false;out.stage='cleanup';return out;}
+
+  $('engine').value='openfoam';
+  for(const [id,value] of Object.entries(options.fields||{})){
+    const el=$(id);if(el){el.value=String(value);el.dispatchEvent(new Event('change',{bubbles:true}));}
+  }
+  const started=performance.now();
+  try{await startRans();}
+  catch(e){out.ok=false;out.stage='solve';out.error=String(e&&e.message||e);return out;}
+  out.solveSeconds=(performance.now()-started)/1000;
+
+  const r=state.result;
+  if(!r){out.ok=false;out.stage='result';out.error='No result was produced.';return out;}
+  out.result={engine:r.engine,converged:!!r.converged,stopReason:r.stopReason,
+    iterations:r.iteration,cells:r.cells,...tailLoads(r.history),
+    wallTreatment:r.wallTreatment,firstOrder:!!r.firstOrder,
+    recovered:r.recovered?r.recovered.from:null,
+    workers:r.execution?.workers??r.plan?.workers,
+    layerCoverage:r.layerPreflight?{coverage:r.layerPreflight.coverage,mean:r.layerPreflight.mean}:null,
+    blocking:r.reliability?.blocking||[]};
+  // The whole point: finite, physically sized numbers rather than 1e43.
+  out.plausible=[r.cd,r.cl].every(v=>Number.isFinite(v)&&Math.abs(v)<100);
+  out.ok=out.plausible;
+  return out;
 };
 
 window.openStartupProject=async text=>{loadProject(JSON.parse(text));await reopenSelectedStudy();return {name:state.name,cleanup:state.cleanup};};
@@ -1041,7 +1141,7 @@ window.qaAssembly=async()=>{
  meshes[[D,M,E,'PA',''].join('|')]=boxSTL(.2,.38,.04);
 
  window.__qaStep='installAssembly';
- installAssembly({definition,meshes,link:null,workspace:true,name:'QA assembly'},'QA assembly');
+ await installAssembly({definition,meshes,link:null,workspace:true,name:'QA assembly'},'QA assembly');
  window.__qaStep='showModal';
  $('assemblyDialog').showModal();
  window.__qaStep='posed';
@@ -1134,7 +1234,7 @@ window.checkSliceInteraction=async()=>{
  $('colorRange').value='manual';$('colorMin').value=-1;$('colorMax').value=1;drawFlow();selectMode('section');selectMode('pressure');if(state.displayScale.min!==-1||state.displayScale.max!==1)throw Error('Slice colors changed the surface manual range');$('colorRange').value='auto';drawFlow();return {ok:true,liveInput:true,coalesced:true,continuous:true,manualRangePreserved:true,lockedVelocityContrast:true,elapsedMs:elapsed,ongoingDragMs:times,physicsPreserved:true};
 };
 
-api.foamInfo().then(info=>{$('gpuStatus').textContent=info.gpu?.message||'GPU solver is not installed.';$('computeBackend').querySelector('[value=gpu]').disabled=!info.gpu?.ready;}).catch(()=>{$('gpuStatus').textContent='GPU setup status unavailable; CPU solving remains available.';});
+api.foamInfo().then(info=>{$('gpuStatus').textContent=info.gpu?.message||'GPU solver is not installed.';$('computeBackend').querySelector('[value=gpu]').disabled=!info.gpu?.ready;const par=info.parallelRuntime,cores=info.hardware?.logicalCores||1,usable=Math.max(1,Math.floor(cores/2));for(const option of $('cpuWorkers').options){const n=Number(option.value);if(!Number.isFinite(n)||n<=1)continue;option.disabled=!par?.ready||n>usable;}if(par&&!par.ready){$('cpuWorkers').querySelector('[value=auto]').textContent='Auto · single worker';if($('cpuWorkers').value!=='1'&&$('cpuWorkers').value!=='auto')$('cpuWorkers').value='auto';$('cpuWorkersStatus').textContent='Multi-core solving is unavailable: '+par.reason;}else if(par){$('cpuWorkers').querySelector('[value=auto]').textContent='Auto · up to '+usable+' workers';$('cpuWorkersStatus').textContent=cores+' logical cores detected; up to '+usable+' used for solving.';}}).catch(()=>{$('gpuStatus').textContent='GPU setup status unavailable; CPU solving remains available.';});
 
 window.qaVelocitySliceScale=async mode=>{selectMode('section');$('colorRange').value=mode;state.sliceColorMode=mode;$('volumeField').value='speed';$('slicePlane').value='2';$('slicePosition').value='0';drawFlow();selectView('iso');await new Promise(resolve=>setTimeout(resolve,250));renderer.render(scene,camera);return {mode,scale:state.displayScale,coordinate:state.sliceCoordinate,inlet:state.settings.speed,note:$('scaleNote').textContent};};
 

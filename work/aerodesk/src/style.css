@@ -179,3 +179,17 @@ dialog .browse-actions{margin-top:9px}
    browser's four pickers need the rhythm applied at matching specificity. */
 #onshapeBrowser label{margin:16px 0 0}
 #onshapeBrowser>label:first-child{margin-top:0}
+
+/* ---- Progress ----------------------------------------------------------------
+   Long operations used to give no sign of life at all. */
+.load-progress{margin:14px 0 0}
+.load-progress .progress-track{height:5px;margin-bottom:7px;background:#dde5ec}
+.load-progress .progress-track div{background:var(--accent);transition:width .18s}
+#assemblyProgressText{margin:0;font-variant-numeric:tabular-nums}
+
+/* A thin indeterminate bar under the header for any blocking work. */
+.busy-bar{position:fixed;top:0;left:0;right:0;height:3px;z-index:40;background:#d7e3ec;overflow:hidden}
+.busy-bar>div{position:absolute;inset:0;width:38%;background:var(--accent);
+ animation:busy-slide 1.05s ease-in-out infinite}
+@keyframes busy-slide{0%{left:-38%}100%{left:100%}}
+@media(prefers-reduced-motion:reduce){.busy-bar>div{animation:none;left:0;width:100%;opacity:.55}}

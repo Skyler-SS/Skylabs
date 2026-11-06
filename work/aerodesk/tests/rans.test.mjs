@@ -53,3 +53,31 @@ test('streamlines cannot cross thin CAD even when the display grid misses it',()
 test('sample columns follow OpenFOAM scalar-before-vector filename order',async()=>{
   const dir=await mkdtemp(path.join(tmpdir(),'aerodesk-sampling-'));try{await mkdir(path.join(dir,'postProcessing/sampleForViewer/50'),{recursive:true});await writeFile(path.join(dir,'postProcessing/sampleForViewer/50/viewer_p_U.xy'),'0.5 0.5 0.5 7 20 1 -2\n');const r=await readSamples(dir,{N:1,nx:1,ny:1,nz:1,h:1,origin:[0,0,0]},1);assert.equal(r.ux[0],20);assert.equal(r.uy[0],1);assert.equal(r.uz[0],-2);assert.equal(r.pressure[0],7);assert.equal(r.solid[0],0);}finally{await rm(dir,{recursive:true,force:true});}
 });
+
+test('multi-core is refused up front when the MPI-linked build is absent', () => {
+  // Microsoft MPI being installed does not mean the MPI-LINKED OpenFOAM build is.
+  // Reporting availability from mpiexec alone let a multi-core run mesh for minutes
+  // and only then fail at decomposePar, throwing the mesh away.
+  const absent={...hardware,freeGB:64,mpiAvailable:false,
+    parallelRuntime:{ready:false,reason:'The MPI-linked OpenFOAM build is not installed.'}};
+
+  // An explicit request must fail immediately, naming the cause.
+  assert.throws(()=>plan({...settings,cpuWorkers:'8'},vertices,absent),
+    /Multi-core solving is unavailable.*MPI-linked/s);
+
+  // Auto must quietly fall back to a working single-core run, not fail.
+  const auto=plan({...settings,cpuWorkers:'auto'},vertices,absent);
+  assert.equal(auto.workers,1,'auto degrades to one worker instead of throwing');
+
+  // Explicitly asking for 1 is always fine.
+  assert.equal(plan({...settings,cpuWorkers:'1'},vertices,absent).workers,1);
+
+  // With the runtime present, the request is honoured.
+  const ready={...hardware,freeGB:64,logicalCores:32,mpiAvailable:true,
+    parallelRuntime:{ready:true,reason:null}};
+  assert.ok(plan({...settings,cpuWorkers:'8'},vertices,ready).workers>1,
+    'a real parallel runtime still allows multi-core');
+
+  // The GPU backend is single-process and must not be blocked by a missing MPI build.
+  assert.equal(plan({...settings,computeBackend:'gpu',cpuWorkers:'8'},vertices,absent).workers,1);
+});

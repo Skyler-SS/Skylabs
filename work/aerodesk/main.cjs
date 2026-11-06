@@ -26,7 +26,7 @@ async function writeProject(file,text){const project=JSON.parse(text);await stud
 
 const calibrationPath=()=>path.join(app.getPath('userData'),'openfoam-calibration-v2.json');
 const readCalibration=()=>fs.readFile(calibrationPath(),'utf8').then(JSON.parse,()=>fs.readFile(path.join(app.getPath('userData'),'openfoam-calibration.json'),'utf8').then(JSON.parse,()=>null));
-ipcMain.handle('foam-info',async()=>({hardware:foam.hardware(),available:!!(await foam.runtime().catch(()=>null)),calibration:await readCalibration(),gpu:await fs.readFile(path.join(app.getPath('userData'),'gpu-setup.json'),'utf8').then(JSON.parse,()=>({ready:false,message:'GPU solver is not installed.'}))}));
+ipcMain.handle('foam-info',async()=>({hardware:foam.hardware(),parallelRuntime:await foam.parallelRuntime().catch(e=>({ready:false,reason:e.message})),available:!!(await foam.runtime().catch(()=>null)),calibration:await readCalibration(),gpu:await fs.readFile(path.join(app.getPath('userData'),'gpu-setup.json'),'utf8').then(JSON.parse,()=>({ready:false,message:'GPU solver is not installed.'}))}));
 ipcMain.handle('foam-plan',async(_event,{settings,vertices})=>foam.plan(settings,vertices,await foam.availableHardware(settings),await readCalibration()));
 ipcMain.handle('foam-run',async(_event,{settings,vertices,cleanupReport})=>{
   if(foamJob)throw Error('A simulation is already running.');
@@ -93,6 +93,7 @@ ipcMain.handle('onshape-assembly',async(_event,link)=>{
   if(!keys)throw Error('Connect Onshape first.');
   const {assemblyDefinition,partStlUrl,request}=onshape;
   const {definition,target}=await assemblyDefinition(keys,link);
+  if(!_event.sender.isDestroyed())_event.sender.send('assembly-progress',{phase:'structure'});
   const {readAssembly,leafParts}=await import('./src/joints.mjs');
   const assembly=readAssembly(definition);
   const parts=leafParts(assembly);
@@ -102,15 +103,35 @@ ipcMain.handle('onshape-assembly',async(_event,link)=>{
   const unique=new Map();
   for(const part of parts)if(!unique.has(part.source))unique.set(part.source,part.instance);
   if(unique.size>ASSEMBLY_MAX_SOURCES)throw Error('This assembly uses '+unique.size+' distinct parts (limit '+ASSEMBLY_MAX_SOURCES+'). Import a sub-assembly.');
-  const meshes={};let total=0,done=0;
-  for(const [source,instance] of unique){
-    const bytes=await request(partStlUrl(keys.origin,instance),keys);
-    total+=bytes.length;
-    if(total>ASSEMBLY_MAX_BYTES)throw Error('This assembly exceeds 512 MB of geometry. Import fewer parts.');
-    meshes[source]=new Uint8Array(bytes);
-    done++;
-    if(!_event.sender.isDestroyed())_event.sender.send('assembly-progress',{done,total:unique.size,name:instance.name});
-  }
+  // Each part is a separate round trip that Onshape tessellates server side, so
+  // fetching them one at a time is what made a large assembly feel like it had hung.
+  // A small fixed pool overlaps them without pushing into Onshape's rate limits.
+  const CONCURRENCY=5;
+  const meshes={};let bytesSoFar=0,done=0,failed=null;
+  const queue=[...unique];
+  const report=name=>{
+    if(!_event.sender.isDestroyed())
+      _event.sender.send('assembly-progress',{phase:'parts',done,total:unique.size,name});
+  };
+  report('');
+  const worker=async()=>{
+    while(queue.length&&!failed){
+      const [source,instance]=queue.shift();
+      try{
+        const bytes=await request(partStlUrl(keys.origin,instance),keys);
+        bytesSoFar+=bytes.length;
+        if(bytesSoFar>ASSEMBLY_MAX_BYTES)throw Error('This assembly exceeds 512 MB of geometry. Import fewer parts.');
+        meshes[source]=new Uint8Array(bytes);
+      }catch(e){
+        // One unreadable part should name itself rather than failing anonymously.
+        failed=failed||Error('Could not download "'+instance.name+'": '+e.message);
+        return;
+      }
+      done++;report(instance.name);
+    }
+  };
+  await Promise.all(Array.from({length:Math.min(CONCURRENCY,unique.size)},worker));
+  if(failed)throw failed;
   return {definition,meshes,link:target.link,workspace:target.workspace,
     name:'Onshape assembly '+target.element.slice(0,6),occurrences:parts.length,sources:unique.size,
     subAssemblies:(definition.subAssemblies||[]).length,truncated:!!assembly.truncated};
@@ -133,7 +154,7 @@ app.whenReady().then(async()=>{
     }catch(e){console.error(e.message);app.exit(1);}return;
   }
   const importTest=process.argv.find(a=>a.startsWith('--cleanup-file-test='));
-  const captureMode=process.argv.includes('--assembly-qa')||process.argv.includes('--restore-qa')||process.argv.includes('--onshape-browse-test')||process.argv.includes('--reynolds-smoke-test')||!!importTest||process.argv.includes('--cleanup-smoke-test')||process.argv.includes('--smoke-test')||process.argv.includes('--rans-smoke-test')||process.argv.includes('--connection-proof');
+  const captureMode=process.argv.some(a=>a.startsWith('--rans-file-test='))||process.argv.includes('--assembly-qa')||process.argv.includes('--restore-qa')||process.argv.includes('--onshape-browse-test')||process.argv.includes('--reynolds-smoke-test')||!!importTest||process.argv.includes('--cleanup-smoke-test')||process.argv.includes('--smoke-test')||process.argv.includes('--rans-smoke-test')||process.argv.includes('--connection-proof');
   win=new BrowserWindow({width:1480,height:940,minWidth:1100,minHeight:740,backgroundColor:'#101822',icon:path.join(__dirname,'app.ico'),title:'SkyLabs 0.14.0 — OpenFOAM wind tunnel',show:!captureMode,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,backgroundThrottling:false,offscreen:captureMode,partition:captureMode?'qa-'+Date.now():undefined}});
   Menu.setApplicationMenu(null);
   if(captureMode)win.webContents.on('console-message',event=>{if(event.level==='error')console.error('Renderer: '+event.message);});
@@ -186,6 +207,22 @@ app.whenReady().then(async()=>{
   if(process.argv.includes('--quality-qa')){const report=await win.webContents.executeJavaScript('window.qaQualityModes()'),target=path.resolve(process.env.AERODESK_TEST_OUTPUT);await fs.mkdir(target,{recursive:true});await fs.writeFile(path.join(target,'quality-ui-check.json'),JSON.stringify(report,null,2));await fs.writeFile(path.join(target,'quality-ui.png'),(await win.webContents.capturePage()).toPNG());}
   if(process.argv.includes('--restore-qa')){app.exit(0);return;}
   if(process.argv.includes('--cleanup-smoke-test')){try{const report=await win.webContents.executeJavaScript('window.runCleanupSmokeTest()');const folder=path.resolve(process.env.AERODESK_TEST_OUTPUT||app.getPath('temp'));await fs.mkdir(folder,{recursive:true});await fs.writeFile(path.join(folder,'cleanup-smoke-report.json'),JSON.stringify(report,null,2));await fs.writeFile(path.join(folder,'cleanup-screenshot.png'),(await win.webContents.capturePage()).toPNG());console.log(JSON.stringify(report));app.exit(0);}catch(e){console.error(e);app.exit(1);}return;}
+  const ransFile=(process.argv.find(a=>a.startsWith('--rans-file-test='))||'').split('=').slice(1).join('=');
+  if(ransFile){
+    try{
+      const bytes=await fs.readFile(path.resolve(ransFile));
+      const options=JSON.parse(process.env.AERODESK_TEST_SETTINGS||'{}');
+      const report=await win.webContents.executeJavaScript(
+        'window.runRansFileTest('+JSON.stringify({name:path.basename(ransFile),bytes:[...bytes]})+','
+        +JSON.stringify(options)+')');
+      const folder=path.resolve(process.env.AERODESK_TEST_OUTPUT||app.getPath('temp'));
+      await fs.mkdir(folder,{recursive:true});
+      await fs.writeFile(path.join(folder,'rans-file-report.json'),JSON.stringify(report,null,2));
+      await fs.writeFile(path.join(folder,'rans-file.png'),(await win.webContents.capturePage()).toPNG());
+      console.log(JSON.stringify(report));
+    }catch(e){console.log(JSON.stringify({ok:false,error:String(e&&e.message||e)}));}
+    app.quit();return;
+  }
   if(process.argv.includes('--rans-smoke-test')){
     try{const report=await win.webContents.executeJavaScript('window.runRansSmokeTest()');const folder=path.resolve(process.env.AERODESK_TEST_OUTPUT||app.getPath('temp'));await fs.mkdir(folder,{recursive:true});await fs.writeFile(path.join(folder,'rans-smoke-report.json'),JSON.stringify(report,null,2));await fs.writeFile(path.join(folder,'rans-screenshot.png'),(await win.webContents.capturePage()).toPNG());console.log(JSON.stringify(report));app.exit(0);}catch(e){console.error(e);app.exit(1);}return;
   }
